@@ -11,3 +11,5 @@ name = 'geodensity'
 
 [dependencies]
 extendr-api = '*'
+rayon = "1.7"
+geo = "0.28"

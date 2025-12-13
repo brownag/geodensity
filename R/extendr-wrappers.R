@@ -10,9 +10,19 @@
 #' @useDynLib geodensity, .registration = TRUE
 NULL
 
-#' Return string `"Hello world!"` to R.
-#' @export
-hello_world <- function() .Call(wrap__hello_world)
+#' Compute Geodesic Kernel Density Estimate
+#'
+#' This function calculates kernel density estimates on a geographic grid using geodesic
+#' (great-circle) distances. The computation is parallelized across CPU cores using Rayon.
+#'
+#' @param x_coords Vector of X (longitude) coordinates of data points
+#' @param y_coords Vector of Y (latitude) coordinates of data points
+#' @param grid_x Vector of X coordinates for the output grid cells
+#' @param grid_y Vector of Y coordinates for the output grid cells
+#' @param bandwidth_km Bandwidth in kilometers (standard deviation of Gaussian kernel)
+#' @return A vector of density values corresponding to the grid points
+#' @noRd
+geodesic_kde_rust <- function(x_coords, y_coords, grid_x, grid_y, bandwidth_km) .Call(wrap__geodesic_kde_rust, x_coords, y_coords, grid_x, grid_y, bandwidth_km)
 
 
 # nolint end

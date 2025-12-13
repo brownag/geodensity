@@ -1,5 +1,7 @@
-^src/\.cargo$
 ^src/rust/vendor$
 ^src/rust/target$
 ^src/Makevars$
 ^src/Makevars\.win$
+.github/development/
+Makefile
+^LICENSE\.md$

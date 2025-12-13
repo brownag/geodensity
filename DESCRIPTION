@@ -1,11 +1,12 @@
 Package: geodensity
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Title: Geodesic Kernel Density Estimation for Spatial Data
+Version: 0.1.0
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Andrew", "Brown", , "brown.andrewg@gmail.com", role = c("aut", "cre"))
+Description: Compute kernel density estimates on geographic data using geodesic distances.
+    Combines the terra package's efficient raster processing with a parallelized Rust backend
+    to deliver scalable, accurate density estimation for large geospatial datasets without.
+License: CC0
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
@@ -13,3 +14,8 @@ Config/rextendr/version: 0.4.1
 SystemRequirements: Cargo (Rust's package manager), rustc
 Depends: 
     R (>= 4.2)
+Imports: 
+    terra (>= 1.7.0)
+Suggests: 
+    sf,
+    testthat (>= 3.0.0), tinytest
