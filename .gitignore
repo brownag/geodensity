@@ -3,3 +3,4 @@ src/Makevars
 src/Makevars.win
 .github/development/
 src/rust/vendor.tar.xz
+README.html

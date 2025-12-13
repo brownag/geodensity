@@ -5,3 +5,6 @@
 .github/development/
 Makefile
 ^LICENSE\.md$
+^README\.Rmd$
+^README\.html$
+^README\.knit\.md$
