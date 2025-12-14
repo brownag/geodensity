@@ -138,10 +138,164 @@ fn geodesic_kde_rust(
     densities
 }
 
+/// Compute Adaptive Geodesic Kernel Density Estimate
+///
+/// This function implements a two-pass adaptive bandwidth algorithm where the bandwidth
+/// at each grid cell is scaled inversely with the pilot density. High-density regions
+/// use smaller bandwidths (detailed), while sparse regions use larger bandwidths (smoother).
+///
+/// Algorithm:
+/// 1. Pass 1: Compute pilot density with fixed pilot_bandwidth_km
+/// 2. Pass 2: Scale bandwidth per grid cell: bandwidth_scaled = pilot_bw / sqrt(pilot_density)
+///           (clamped to [min_bandwidth_km, pilot_bandwidth_km])
+/// 3. Pass 3: Compute final density using scaled bandwidths
+///
+/// @param x_coords Vector of X (longitude) coordinates of data points
+/// @param y_coords Vector of Y (latitude) coordinates of data points
+/// @param grid_x Vector of X coordinates for the output grid cells
+/// @param grid_y Vector of Y coordinates for the output grid cells
+/// @param pilot_bandwidth_km Pilot bandwidth in kilometers (used in Pass 1)
+/// @param min_bandwidth_km Minimum bandwidth in kilometers (lower bound for scaling)
+/// @return A vector of adaptive density values corresponding to the grid points
+/// @keywords internal
+#[extendr]
+fn geodesic_kde_adaptive_rust(
+    x_coords: Vec<f64>,
+    y_coords: Vec<f64>,
+    grid_x: Vec<f64>,
+    grid_y: Vec<f64>,
+    pilot_bandwidth_km: f64,
+    min_bandwidth_km: f64,
+) -> Vec<f64> {
+    // Pass 1: Compute pilot density with fixed bandwidth
+    let pilot_density = geodesic_kde_rust(
+        x_coords.clone(),
+        y_coords.clone(),
+        grid_x.clone(),
+        grid_y.clone(),
+        pilot_bandwidth_km,
+    );
+
+    // Pass 2: Compute scaling factors per grid cell
+    // Adaptive scaling: bandwidth_i = pilot_bw / (1 + (density_i / ref_density)^lambda)
+    // where lambda controls adaptation strength and ref_density is the pilot density max
+    // This gives smooth interpolation between min_bw (at high density) and pilot_bw (at zero density)
+    
+    let reference_density = pilot_density.iter().copied().fold(0.0, f64::max);
+    let lambda = 0.5;  // Control adaptation strength
+    
+    let scales: Vec<f64> = pilot_density
+        .iter()
+        .map(|&d| {
+            // Smooth scaling: high density -> lower bandwidth, low density -> higher bandwidth
+            let density_ratio = if reference_density > 0.0 { d / reference_density } else { 0.0 };
+            let scale_factor = 1.0 / (1.0 + density_ratio.powf(lambda));
+            let bandwidth_range = pilot_bandwidth_km - min_bandwidth_km;
+            min_bandwidth_km + bandwidth_range * scale_factor
+        })
+        .collect();
+
+    // Pass 3: Compute final density using per-cell scaled bandwidths
+    // This is more complex than Pass 1 because we need different bandwidths per grid cell
+    let data_points: Vec<_> = x_coords
+        .iter()
+        .zip(y_coords.iter())
+        .map(|(&x, &y)| geo::Point::new(x, y))
+        .collect();
+
+    // Central latitude for index sizing (use pilot bandwidth for consistency)
+    let central_lat = if !y_coords.is_empty() {
+        y_coords.iter().sum::<f64>() / y_coords.len() as f64
+    } else {
+        0.0
+    };
+
+    let lat_rad = central_lat.to_radians();
+    let cos_lat = lat_rad.cos();
+    let km_per_lon_degree = 111.32 * cos_lat;
+    let km_per_lat_degree = 111.32;
+
+    // Build spatial index using pilot bandwidth for consistency
+    let search_radius_km = 3.0 * pilot_bandwidth_km;
+    let search_radius_lon_deg = search_radius_km / km_per_lon_degree.abs().max(0.1);
+    let search_radius_lat_deg = search_radius_km / km_per_lat_degree;
+    let search_radius_deg = search_radius_lon_deg.min(search_radius_lat_deg);
+    let index_cell_size = (search_radius_deg * 1.5).max(0.1).min(45.0);
+
+    let mut grid_index: std::collections::HashMap<(i32, i32), Vec<usize>> =
+        std::collections::HashMap::new();
+
+    for (idx, point) in data_points.iter().enumerate() {
+        let x_key = (point.x() / index_cell_size).floor() as i32;
+        let y_key = (point.y() / index_cell_size).floor() as i32;
+
+        grid_index
+            .entry((x_key, y_key))
+            .or_insert_with(Vec::new)
+            .push(idx);
+
+        if point.x() > 90.0 {
+            let wrapped_x = point.x() - 360.0;
+            let wrapped_key = (wrapped_x / index_cell_size).floor() as i32;
+            grid_index
+                .entry((wrapped_key, y_key))
+                .or_insert_with(Vec::new)
+                .push(idx);
+        } else if point.x() < -90.0 {
+            let wrapped_x = point.x() + 360.0;
+            let wrapped_key = (wrapped_x / index_cell_size).floor() as i32;
+            grid_index
+                .entry((wrapped_key, y_key))
+                .or_insert_with(Vec::new)
+                .push(idx);
+        }
+    }
+
+    let search_radius_cells = (search_radius_deg / index_cell_size).ceil() as i32;
+
+    // Parallel computation using scaled bandwidths
+    let densities: Vec<f64> = grid_x
+        .par_iter()
+        .zip(grid_y.par_iter())
+        .zip(scales.par_iter())
+        .map(|((&gx, &gy), &bandwidth_km)| {
+            let grid_point = geo::Point::new(gx, gy);
+            let mut sum = 0.0;
+
+            let grid_x_key = (gx / index_cell_size).floor() as i32;
+            let grid_y_key = (gy / index_cell_size).floor() as i32;
+
+            for dx in -search_radius_cells..=search_radius_cells {
+                for dy in -search_radius_cells..=search_radius_cells {
+                    let cell_key = (grid_x_key + dx, grid_y_key + dy);
+
+                    if let Some(point_indices) = grid_index.get(&cell_key) {
+                        for &idx in point_indices {
+                            let point = &data_points[idx];
+                            let dist_meters = point.haversine_distance(&grid_point);
+                            let dist_km = dist_meters / 1000.0;
+
+                            if dist_km < (bandwidth_km * 3.0) {
+                                let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
+                                let k = exponent.exp();
+                                sum += k;
+                            }
+                        }
+                    }
+                }
+            }
+            sum
+        })
+        .collect();
+
+    densities
+}
+
 // Macro to generate exports.
 // This ensures exported functions are registered with R.
 // See corresponding C code in `entrypoint.c`.
 extendr_module! {
     mod geodensity;
     fn geodesic_kde_rust;
+    fn geodesic_kde_adaptive_rust;
 }

@@ -8,3 +8,4 @@ Makefile
 ^README\.Rmd$
 ^README\.html$
 ^README\.knit\.md$
+.github/

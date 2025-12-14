@@ -24,5 +24,20 @@ NULL
 #' @noRd
 geodesic_kde_rust <- function(x_coords, y_coords, grid_x, grid_y, bandwidth_km) .Call(wrap__geodesic_kde_rust, x_coords, y_coords, grid_x, grid_y, bandwidth_km)
 
+#' Compute Adaptive Geodesic Kernel Density Estimate
+#'
+#' This function calculates adaptive kernel density estimates where bandwidth varies inversely
+#' with local point density. The computation uses a two-pass algorithm with parallelization.
+#'
+#' @param x_coords Vector of X (longitude) coordinates of data points
+#' @param y_coords Vector of Y (latitude) coordinates of data points
+#' @param grid_x Vector of X coordinates for the output grid cells
+#' @param grid_y Vector of Y coordinates for the output grid cells
+#' @param pilot_bandwidth_km Pilot bandwidth in kilometers for the first pass
+#' @param min_bandwidth_km Minimum bandwidth in kilometers (lower bound for adaptive scaling)
+#' @return A vector of adaptive density values corresponding to the grid points
+#' @noRd
+geodesic_kde_adaptive_rust <- function(x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km) .Call(wrap__geodesic_kde_adaptive_rust, x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km)
+
 
 # nolint end

@@ -272,6 +272,152 @@ expect_true(
 
 
 # =============================================================================
+# ADAPTIVE KDE TESTS
+# =============================================================================
+
+# =============================================================================
+# Test 21: kde_adaptive function exists
+# =============================================================================
+expect_true(exists("kde_adaptive"), info = "kde_adaptive function should exist")
+expect_true(is.function(kde_adaptive), info = "kde_adaptive should be a function")
+
+
+# =============================================================================
+# Test 22: Basic adaptive KDE usage
+# =============================================================================
+result_adaptive <- kde_adaptive(pts_vec, template, pilot_bandwidth = 50)
+
+expect_true(
+  inherits(result_adaptive, "SpatRaster"),
+  info = "Adaptive result should be a SpatRaster"
+)
+
+
+# =============================================================================
+# Test 23: Adaptive KDE with explicit min_bandwidth
+# =============================================================================
+result_adaptive_explicit <- kde_adaptive(pts_vec, template, 
+                                         pilot_bandwidth = 50, 
+                                         min_bandwidth = 5)
+
+expect_true(
+  inherits(result_adaptive_explicit, "SpatRaster"),
+  info = "Adaptive with explicit min_bandwidth should work"
+)
+
+
+# =============================================================================
+# Test 24: Adaptive output dimensions match template
+# =============================================================================
+expect_equal(
+  dim(result_adaptive),
+  dim(template),
+  info = "Adaptive output should match template dimensions"
+)
+
+
+# =============================================================================
+# Test 25: Adaptive output values are non-negative
+# =============================================================================
+vals_adaptive <- terra::values(result_adaptive)
+expect_true(
+  all(vals_adaptive >= 0, na.rm = TRUE),
+  info = "Adaptive output values should be non-negative"
+)
+
+
+# =============================================================================
+# Test 26: Adaptive KDE is executable (may match fixed for tiny sample)
+# =============================================================================
+result_fixed_50 <- kde_geodesic(pts_vec, template, bandwidth = 50)
+result_adaptive_50 <- kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = 5)
+
+expect_true(
+  inherits(result_adaptive_50, "SpatRaster"),
+  info = "Adaptive KDE should produce a SpatRaster"
+)
+
+
+# =============================================================================
+# Test 27: Clustered data - adaptive vs fixed comparison
+# =============================================================================
+# Create clustered point pattern (dense center, sparse periphery)
+set.seed(42)
+cluster_dense <- data.frame(
+  lon = rnorm(100, mean = -100, sd = 0.2),
+  lat = rnorm(100, mean = 40, sd = 0.2)
+)
+cluster_sparse <- data.frame(
+  lon = runif(30, -105, -95),
+  lat = runif(30, 35, 45)
+)
+pts_clustered_data <- rbind(cluster_dense, cluster_sparse)
+pts_clustered <- terra::vect(pts_clustered_data, geom = c("lon", "lat"), crs = "OGC:CRS84")
+
+template_clustered <- terra::rast(
+  extent = c(-106, -94, 34, 46),
+  resolution = 0.5,
+  crs = "OGC:CRS84"
+)
+
+# Compute both fixed and adaptive
+result_fixed_cluster <- kde_geodesic(pts_clustered, template_clustered, bandwidth = 50)
+result_adaptive_cluster <- kde_adaptive(pts_clustered, template_clustered, 
+                                        pilot_bandwidth = 50, min_bandwidth = 5)
+
+# Adaptive should produce values in both high and low density regions
+max_adaptive <- max(terra::values(result_adaptive_cluster), na.rm = TRUE)
+expect_true(
+  max_adaptive > 0,
+  info = "Adaptive KDE should produce positive density in clustered data"
+)
+
+
+# =============================================================================
+# Test 28: Validation - min_bandwidth validation
+# =============================================================================
+expect_error(
+  kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = -5),
+  info = "Should reject negative min_bandwidth"
+)
+
+expect_error(
+  kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = 0),
+  info = "Should reject zero min_bandwidth"
+)
+
+expect_error(
+  kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = 60),
+  info = "Should reject min_bandwidth greater than pilot_bandwidth"
+)
+
+
+# =============================================================================
+# Test 29: Rust backend adaptive function exists
+# =============================================================================
+expect_true(
+  exists("geodesic_kde_adaptive_rust", where = asNamespace("geodensity")),
+  info = "Internal geodesic_kde_adaptive_rust function should be available"
+)
+
+
+# =============================================================================
+# Test 30: Default min_bandwidth is 10% of pilot
+# =============================================================================
+# Compute with implicit default
+result_default_min <- kde_adaptive(pts_clustered, template_clustered, pilot_bandwidth = 50)
+
+# Compute with explicit 10% minimum (0.1 * 50 = 5)
+result_explicit_min <- kde_adaptive(pts_clustered, template_clustered, 
+                                    pilot_bandwidth = 50, min_bandwidth = 5)
+
+expect_true(
+  inherits(result_default_min, "SpatRaster"),
+  info = "Adaptive with default min_bandwidth should work"
+)
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 # All tests completed

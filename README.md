@@ -140,6 +140,25 @@ For typical analyses with thousands to millions of points and moderate
 resolutions, computation completes within seconds to minutes on standard
 hardware.
 
+## Adaptive Bandwidth
+
+For datasets with highly variable point density, the `kde_adaptive()`
+function scales the bandwidth inversely with local density, producing
+finer detail in high-density regions and smoother estimates in sparse
+regions. This “balloon estimator” approach often yields better results
+for multi-scale point patterns (e.g., urban centers surrounded by sparse
+rural areas, marine hotspots in vast oceans).
+
+``` r
+# Adaptive KDE with variable bandwidth
+dens_adaptive <- kde_adaptive(pts, template, pilot_bandwidth = 50, min_bandwidth = 5)
+```
+
+The algorithm uses a two-pass approach: (1) compute initial density with
+fixed pilot bandwidth, (2) scale bandwidth at each grid cell inversely
+with the pilot density, ensuring high-density regions get small kernels
+(detail) and sparse regions get large kernels (smoothness).
+
 ## References
 
 - Haversine formula: <https://en.wikipedia.org/wiki/Haversine_formula>
