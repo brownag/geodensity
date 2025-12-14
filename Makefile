@@ -1,4 +1,4 @@
-.PHONY: help build test install clean docs dev-setup check lint format vendor all
+.PHONY: help build test install clean docs dev-setup check lint format vendor all readme
 
 # Default target
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  make install     - Install package to library"
 	@echo "  make load        - Load package in development mode"
 	@echo "  make docs        - Generate roxygen2 documentation"
+	@echo "  make readme      - Render README.Rmd to README.md and README.html"
 	@echo "  make check       - Run R CMD check (full validation)"
 	@echo "  make lint        - Check for code issues"
 	@echo "  make format      - Auto-format code"
@@ -60,6 +61,11 @@ docs:
 	@echo "Generating roxygen2 documentation..."
 	@Rscript -e "roxygen2::roxygenise()"
 	@echo "Documentation generated!"
+
+# Render README.Rmd to README.md and README.html
+readme:
+	@echo "Rendering README.Rmd..."
+	@Rscript -e "rmarkdown::render('README.Rmd', output_format='all', quiet=TRUE); cat('README rendered to README.md and README.html\n')"
 
 # Full R CMD check
 check: vendor docs
