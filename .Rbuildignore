@@ -9,3 +9,4 @@ Makefile
 ^README\.html$
 ^README\.knit\.md$
 .github/
+^\.github$
