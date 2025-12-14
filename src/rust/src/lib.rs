@@ -72,9 +72,14 @@ fn geodesic_kde_rust(
     let lat_rad = central_lat.to_radians();
     let cos_lat = lat_rad.cos();
     
-    // Haversine approximation: km per degree (varies with latitude)
-    // Longitude: 111.32 * cos(lat) km/degree
-    // Latitude: 111.32 km/degree (approximately constant)
+    // Linear degree-to-km conversion for spatial index grid sizing
+    // Used ONLY to determine search box size in degrees; actual distances use Haversine
+    // 
+    // Latitude degrees: constant everywhere (~111.32 km/degree)
+    // because latitude lines are parallel meridians
+    //
+    // Longitude degrees: varies with latitude (~111.32 * cos(lat) km/degree)
+    // because longitude lines (meridians) converge toward poles
     let km_per_lon_degree = 111.32 * cos_lat;
     let km_per_lat_degree = 111.32;
     

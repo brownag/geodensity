@@ -31,9 +31,9 @@ remotes::install_github("brownag/geodensity")
 
 To demonstrate geodesic correctness with spatially structured data,
 consider AIS (ship position) data from a vessel crossing the Pacific
-Ocean. Dense point clusters occur where the ship slowed for refueling or
-anchoring, while sparse points mark fast transit segments. This
-real-world example crosses the international dateline seamlessly.
+Ocean. Dense point clusters occur where the ship moved slowly or was
+stationary, while sparse points mark fast transit segments. This example
+crosses the international dateline seamlessly.
 
 ``` r
 library(geodensity)
@@ -44,27 +44,26 @@ library(terra)
 # Many points per location with jitter to simulate tracking updates and GPS uncertainty
 # Latitudinal error is exaggerated for clarity in "wide" visualization spanning -180 to 180 degrees
 
-
-# Fast transit (day, sparse points with minimal jitter)
-day1 <- data.frame(
+# Fast transit (sparse points with minimal jitter)
+fast1 <- data.frame(
   lon = rnorm(3000, mean = 140, sd = 0.5),
   lat = rnorm(3000, mean = 15, sd = 2)
 )
 
-# Slow transit (night, much denser cluster - ship slowed for refueling)
-night1 <- data.frame(
+# Slow/stopped segment (much denser cluster)
+slow1 <- data.frame(
   lon = rnorm(30000, mean = 148, sd = 1),
   lat = rnorm(30000, mean = 15, sd = 3)
 )
 
-# Daytime transit
-day2 <- data.frame(
+# Fast transit
+fast2 <- data.frame(
   lon = rnorm(4000, mean = 156, sd = 0.5),
   lat = rnorm(4000, mean = 15, sd = 2)
 )
 
-# Another slow cluster approaching the dateline
-night2 <- data.frame(
+# Another slow/stopped segment
+slow2 <- data.frame(
   lon = rnorm(35000, mean = 165, sd = 1.2),
   lat = rnorm(35000, mean = 15, sd = 3.5)
 )
@@ -81,20 +80,20 @@ crossing <- data.frame(
   lat = rnorm(600, mean = 15, sd = 1)
 )
 
-# Slow cluster on the eastern side (morning anchor)
-night3 <- data.frame(
+# Slow/stopped segment on the eastern side
+slow3 <- data.frame(
   lon = rnorm(32000, mean = -162, sd = 1.2),
   lat = rnorm(32000, mean = 15, sd = 3.5)
 )
 
 # Final fast transit
-day3 <- data.frame(
+fast3 <- data.frame(
   lon = rnorm(3500, mean = -150, sd = 0.5),
   lat = rnorm(3500, mean = 15, sd = 2)
 )
 
 # Combine all segments
-pts <- rbind(day1, night1, day2, night2, dateline_cluster, crossing, night3, day3)
+pts <- rbind(fast1, slow1, fast2, slow2, dateline_cluster, crossing, slow3, fast3)
 pts_vec <- terra::vect(pts, geom = c("lon", "lat"), crs = "OGC:CRS84")
 
 # Create a full world template raster from -180 to 180
@@ -119,9 +118,10 @@ The map demonstrates geodesic correctness: the large cluster centered
 exactly on +/-180 degrees appears split between the right edge (positive
 180 degrees) and left edge (negative -180 degrees), even though it is
 geographically a single cohesive point cluster. The densest peaks show
-anchor locations, while transit segments appear as low-density
-corridors. Euclidean methods would fail catastrophically here, treating
-the left and right edges as being on opposite sides of the planet.
+periods of slow or stationary movement, while transit segments appear as
+low-density corridors. Euclidean methods would fail catastrophically
+here, treating the left and right edges as being on opposite sides of
+the planet.
 
 ## Performance
 
@@ -150,9 +150,39 @@ for multi-scale point patterns (e.g., urban centers surrounded by sparse
 rural areas, marine hotspots in vast oceans).
 
 ``` r
-# Adaptive KDE with variable bandwidth
-dens_adaptive <- kde_adaptive(pts, template, pilot_bandwidth = 50, min_bandwidth = 5)
+# Create sample data with variable density
+set.seed(42)
+dense_cluster <- data.frame(
+  lon = rnorm(500, mean = -100, sd = 0.5),
+  lat = rnorm(500, mean = 40, sd = 0.5)
+)
+sparse_region <- data.frame(
+  lon = runif(100, -110, -90),
+  lat = runif(100, 30, 50)
+)
+pts_adaptive <- rbind(dense_cluster, sparse_region)
+pts_adaptive_vec <- terra::vect(pts_adaptive, geom = c("lon", "lat"), crs = "EPSG:4326")
+
+template_adaptive <- terra::rast(
+  extent = c(-110, -90, 30, 50),
+  resolution = 0.1,
+  crs = "EPSG:4326"
+)
+
+# Compute adaptive and fixed density for comparison
+dens_fixed <- kde_geodesic(pts_adaptive_vec, template_adaptive, bandwidth = 50)
+#> Computing geodesic KDE: 600 points, 40000 grid cells, 50.0 km bandwidth
+dens_adaptive <- kde_adaptive(pts_adaptive_vec, template_adaptive, pilot_bandwidth = 50, min_bandwidth = 5)
+#> Computing adaptive geodesic KDE: 600 points, 40000 grid cells, 50.0 km pilot bandwidth, 5.0 km min bandwidth
+
+# Visualize comparison
+par(mfrow = c(1, 3))
+plot(dens_fixed, main = "Fixed Bandwidth (50 km)")
+plot(dens_adaptive, main = "Adaptive Bandwidth")
+plot(dens_fixed - dens_adaptive, main = "Difference")
 ```
+
+<img src="man/figures/README-adaptive-1.png" width="100%" />
 
 The algorithm uses a two-pass approach: (1) compute initial density with
 fixed pilot bandwidth, (2) scale bandwidth at each grid cell inversely
@@ -168,16 +198,37 @@ cross-validation** to select an optimal bandwidth automatically:
 ``` r
 # Select optimal bandwidth via cross-validation
 bw_cv <- bandwidth_optimize(
-  pts_vec,
-  bandwidth_min = 10,
+  pts_adaptive_vec,
+  bandwidth_min = 5,
   bandwidth_max = 200,
-  n_bandwidths = 15,
+  n_bandwidths = 12,
   verbose = TRUE
 )
+#> Evaluating 12 bandwidth values via leave-one-out cross-validation...
+#> 
+#> Bandwidth evaluation results:
+#>   Bandwidth 5.0000 km: LL = -7.6625
+#>   Bandwidth 6.9922 km: LL = -7.3510
+#>   Bandwidth 9.7781 km: LL = -7.1404
+#>   Bandwidth 13.6740 km: LL = -6.9122
+#>   Bandwidth 19.1222 km: LL = -6.5942
+#>   Bandwidth 26.7411 km: LL = -6.2795
+#>   Bandwidth 37.3956 km: LL = -5.9592
+#>   Bandwidth 52.2953 km: LL = -5.8230 <-- OPTIMAL
+#>   Bandwidth 73.1315 km: LL = -5.9075
+#>   Bandwidth 102.2696 km: LL = -6.1536
+#>   Bandwidth 143.0172 km: LL = -6.5167
+#>   Bandwidth 200.0000 km: LL = -6.9347
+#> 
+#> Optimal bandwidth: 52.2953 km
 
 # Use selected bandwidth for final density estimate
-dens_optimal <- kde_geodesic(pts_vec, template, bandwidth = bw_cv$bandwidth_opt)
+dens_optimal <- kde_geodesic(pts_adaptive_vec, template_adaptive, bandwidth = bw_cv$bandwidth_opt)
+#> Computing geodesic KDE: 600 points, 40000 grid cells, 52.3 km bandwidth
+plot(dens_optimal, main = paste("KDE with CV-selected bandwidth:", round(bw_cv$bandwidth_opt, 2), "km"))
 ```
+
+<img src="man/figures/README-bandwidth_optimization-1.png" width="100%" />
 
 The function evaluates a sequence of candidate bandwidths and computes
 the leave-one-out log-likelihood for each. The bandwidth maximizing
@@ -185,10 +236,10 @@ average log-likelihood is selected. This is statistically principled but
 computationally intensive; for large datasets, consider using fewer
 bandwidth candidates to reduce computation time.
 
-**Quick reference:** Silverman's rule-of-thumb provides a reasonable
-starting point: h = 1.06 * sigma * n^(-1/5) where sigma is the standard
-deviation of coordinates and n is the point count. However,
-cross-validation often selects smaller bandwidths than Silverman's rule,
+**Quick reference:** Silverman’s rule-of-thumb provides a reasonable
+starting point: h = 1.06 \* sigma \* n^(-1/5) where sigma is the
+standard deviation of coordinates and n is the point count. However,
+cross-validation often selects smaller bandwidths than Silverman’s rule,
 particularly for clustered data.
 
 ## References
