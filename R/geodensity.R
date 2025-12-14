@@ -132,11 +132,11 @@ kde_geodesic <- function(x, r, bandwidth) {
     bandwidth_km = bandwidth
   )
 
-  # 4. Reconstruct SpatRaster with the computed densities
-  out <- r
-  terra::values(out) <- density_values
-
-  return(out)
+  # 4. Create a copy of the template raster and assign density values
+  # Create a new raster object to avoid modifying the input in place
+  r_out <- terra::rast(r)
+  terra::set.values(r_out, 1:terra::ncell(r_out), density_values)
+  return(r_out)
 }
 
 #' Adaptive Geodesic Kernel Density Estimation
@@ -187,7 +187,7 @@ kde_geodesic <- function(x, r, bandwidth) {
 #' - Often better statistical properties for heterogeneous point patterns
 #'
 #' @examples
-#' \dontrun{
+#' \donttest{
 #' library(geodensity)
 #' library(terra)
 #'
@@ -218,9 +218,13 @@ kde_geodesic <- function(x, r, bandwidth) {
 #' dens_fixed <- kde_geodesic(pts, template, bandwidth = 50)
 #'
 #' # Visualize
-#' par(mfrow = c(1, 2))
+#' par(mfrow = c(1, 3))
 #' plot(dens_fixed, main = "Fixed Bandwidth KDE")
+#' points(pts, alpha = 0.25, pch = "+")
 #' plot(dens_adaptive, main = "Adaptive Bandwidth KDE")
+#' points(pts, alpha = 0.25, pch = "+")
+#' plot(dens_fixed - dens_adaptive, main = "Difference")
+#' points(pts, alpha = 0.25, pch = "+")
 #' }
 #'
 #' @export
@@ -301,11 +305,11 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
     min_bandwidth_km = min_bandwidth
   )
 
-  # 4. Reconstruct SpatRaster with the computed densities
-  out <- r
-  terra::values(out) <- density_values
-
-  return(out)
+  # 4. Create a copy of the template raster and assign density values
+  # Create a new raster object to avoid modifying the input in place
+  r_out <- terra::rast(r)
+  terra::set.values(r_out, 1:terra::ncell(r_out), density_values)
+  return(r_out)
 }
 
 #' Bandwidth Selection via Leave-One-Out Cross-Validation
