@@ -1,8 +1,14 @@
 Package: geodensity
 Title: Geodesic Kernel Density Estimation for Spatial Data
-Version: 0.1.0
-Authors@R: 
-    person("Andrew", "Brown", , "brown.andrewg@gmail.com", role = c("aut", "cre"))
+Version: 0.1.1
+Maintainer: Andrew Gen Brown <brown.andrewg@gmail.com>
+Authors@R: person(
+    given = "Andrew", 
+    middle = "Gene",
+    family = "Brown", 
+    email = "brown.andrewg@gmail.com", 
+    role = c("aut", "cre"),
+    comment = c(ORCID = "0000-0002-4565-533X"))
 Description: Compute kernel density estimates on geographic data using geodesic distances.
     Combines the terra package's efficient raster processing with a parallelized Rust backend
     to deliver scalable, accurate density estimation for large geospatial datasets without.
@@ -18,4 +24,6 @@ Imports:
     terra (>= 1.7.0)
 Suggests: 
     sf,
-    testthat (>= 3.0.0), tinytest
+    tinytest
+URL: https://github.com/brownag/geodensity
+BugReports: https://github.com/brownag/geodensity/issues
