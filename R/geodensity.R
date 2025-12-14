@@ -307,3 +307,195 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
 
   return(out)
 }
+
+#' Bandwidth Selection via Leave-One-Out Cross-Validation
+#'
+#' Selects an optimal bandwidth for kernel density estimation using leave-one-out
+#' cross-validation. The function evaluates the log-likelihood of held-out test points
+#' under models estimated with various bandwidth values, returning the bandwidth that
+#' maximizes the average log-likelihood.
+#'
+#' For large datasets, this can be computationally intensive. Consider using fewer
+#' bandwidth candidates for faster results. The function is most useful for exploratory
+#' analysis; once a suitable bandwidth is identified, it can be used repeatedly for
+#' production density estimates.
+#'
+#' @param x A `SpatVector` or `sf` object containing points in geographic coordinates
+#'   (latitude/longitude). Data must be in a geographic CRS (lon/lat).
+#' @param bandwidth_min Minimum bandwidth in kilometers to evaluate (numeric scalar).
+#'   Default: 1 km.
+#' @param bandwidth_max Maximum bandwidth in kilometers to evaluate (numeric scalar).
+#'   Default: 100 km.
+#' @param n_bandwidths Number of bandwidth values to evaluate on log scale between
+#'   min and max (numeric scalar). Default: 10. Higher values (20-30) provide finer
+#'   resolution but longer computation time.
+#' @param verbose If TRUE, print progress messages including bandwidth values and
+#'   log-likelihood scores. Default: TRUE.
+#'
+#' @return A list with class `bandwidth_cv` containing:
+#'   - `bandwidth_opt`: Optimal bandwidth in kilometers (numeric scalar)
+#'   - `log_likelihood`: Log-likelihood scores for each bandwidth candidate
+#'   - `bandwidths`: Bandwidth values evaluated
+#'   - `n_points`: Number of points evaluated
+#'
+#' @details
+#' ## Algorithm
+#'
+#' Leave-one-out cross-validation (LOOCV) evaluates bandwidth by:
+#' 1. For each bandwidth candidate:
+#'    a. For each test point in the data:
+#'       - Estimate density at that point using all OTHER points
+#'       - Record the density value (likelihood contribution)
+#'    b. Average the log-likelihoods across all test points
+#' 2. Select the bandwidth maximizing average log-likelihood
+#'
+#' LOOCV is unbiased but computationally expensive. The computation is parallelized
+#' in the Rust backend via Rayon. For datasets with >5000 points, consider using
+#' fewer bandwidth candidates (n_bandwidths = 5-8) for faster results.
+#'
+#' ## Relationship to Silverman's Rule
+#'
+#' Silverman's Rule provides a quick estimate: h = 1.06 * sigma * n^(-1/5)
+#' where sigma is the standard deviation of coordinates and n is point count.
+#' This is a reasonable starting point but may be over-smoothed for clustered data.
+#' Cross-validation often selects smaller bandwidths than Silverman's rule.
+#'
+#' @examples
+#' \dontrun{
+#' library(geodensity)
+#' library(terra)
+#'
+#' # Create sample point data
+#' set.seed(42)
+#' pts_data <- data.frame(
+#'   lon = c(rnorm(100, -100, 2), rnorm(50, -95, 1)),
+#'   lat = c(rnorm(100, 40, 2), rnorm(50, 38, 1))
+#' )
+#' pts <- terra::vect(pts_data, geom = c("lon", "lat"), crs = "EPSG:4326")
+#'
+#' # Select optimal bandwidth via cross-validation
+#' bw_cv <- bandwidth_optimize(
+#'   pts,
+#'   bandwidth_min = 1,
+#'   bandwidth_max = 50,
+#'   n_bandwidths = 8
+#' )
+#'
+#' cat("Optimal bandwidth:", bw_cv$bandwidth_opt, "km\n")
+#'
+#' # Use the selected bandwidth for final density estimate
+#' template <- terra::rast(
+#'   extent = c(-105, -85, 35, 45),
+#'   resolution = 0.1,
+#'   crs = "EPSG:4326"
+#' )
+#' dens <- kde_geodesic(pts, template, bandwidth = bw_cv$bandwidth_opt)
+#' plot(dens, main = paste("KDE with CV-selected bandwidth:", bw_cv$bandwidth_opt, "km"))
+#' }
+#'
+#' @export
+bandwidth_optimize <- function(
+    x,
+    bandwidth_min = 1,
+    bandwidth_max = 100,
+    n_bandwidths = 10,
+    verbose = TRUE
+) {
+  # Validation
+  if (inherits(x, "sf")) {
+    x <- terra::vect(x)
+  }
+
+  if (!inherits(x, "SpatVector")) {
+    stop("x must be a SpatVector or sf object")
+  }
+
+  if (!suppressWarnings(terra::is.lonlat(x))) {
+    stop(
+      "Input points must be in Geographic CRS (latitude/longitude). ",
+      "Current CRS: ", terra::crs(x), ". ",
+      "Reproject using terra::project() if needed."
+    )
+  }
+
+  pts <- terra::crds(x)
+  if (nrow(pts) == 0) {
+    stop("Input vector contains no points")
+  }
+
+  if (nrow(pts) < 3) {
+    warning("Bandwidth selection with < 3 points is unreliable; consider using Silverman's rule")
+  }
+
+  # Validate bandwidth parameters
+  if (!is.numeric(bandwidth_min) || bandwidth_min <= 0) {
+    stop("bandwidth_min must be positive")
+  }
+  if (!is.numeric(bandwidth_max) || bandwidth_max <= 0) {
+    stop("bandwidth_max must be positive")
+  }
+  if (bandwidth_max <= bandwidth_min) {
+    stop("bandwidth_max must be greater than bandwidth_min")
+  }
+  if (!is.numeric(n_bandwidths) || n_bandwidths < 2 || n_bandwidths != as.integer(n_bandwidths)) {
+    stop("n_bandwidths must be an integer >= 2")
+  }
+
+  # Create log-spaced bandwidth sequence
+  bandwidths <- exp(seq(log(bandwidth_min), log(bandwidth_max), length.out = n_bandwidths))
+
+  if (verbose) {
+    cat(sprintf("Evaluating %d bandwidth values via leave-one-out cross-validation...\n", n_bandwidths))
+  }
+
+  # Call Rust backend for LOOCV evaluation
+  log_likelihoods <- bandwidth_loocv_evaluate(pts[, 1], pts[, 2], bandwidths)
+
+  # Find optimal bandwidth
+  idx_opt <- which.max(log_likelihoods)
+  bandwidth_opt <- bandwidths[idx_opt]
+
+  if (verbose) {
+    cat("\nBandwidth evaluation results:\n")
+    for (i in seq_along(bandwidths)) {
+      marker <- if (i == idx_opt) " <-- OPTIMAL" else ""
+      cat(sprintf("  Bandwidth %.4f km: LL = %.4f%s\n", bandwidths[i], log_likelihoods[i], marker))
+    }
+    cat(sprintf("\nOptimal bandwidth: %.4f km\n", bandwidth_opt))
+  }
+
+  # Return results
+  result <- list(
+    bandwidth_opt = bandwidth_opt,
+    bandwidths = bandwidths,
+    log_likelihood = log_likelihoods,
+    n_points = nrow(pts)
+  )
+  class(result) <- c("bandwidth_cv", "list")
+
+  return(result)
+}
+
+#' Print bandwidth_cv object
+#'
+#' @param x A `bandwidth_cv` object from `bandwidth_optimize()`
+#' @param ... Additional arguments (unused)
+#' @export
+print.bandwidth_cv <- function(x, ...) {
+  cat("Bandwidth Cross-Validation Results\n")
+  cat("==================================\n")
+  cat(sprintf("Number of points evaluated: %d\n", x$n_points))
+  cat(sprintf("Bandwidths evaluated: %.1f to %.1f km (%d values)\n",
+    min(x$bandwidths), max(x$bandwidths), length(x$bandwidths)
+  ))
+  cat(sprintf("\nOptimal bandwidth: %.4f km\n", x$bandwidth_opt))
+  cat(sprintf("Log-likelihood at optimal: %.4f\n\n", max(x$log_likelihood)))
+
+  # Show top 3 bandwidths
+  top_idx <- order(x$log_likelihood, decreasing = TRUE)[1:min(3, length(x$bandwidths))]
+  cat("Top 3 bandwidths:\n")
+  for (i in seq_along(top_idx)) {
+    idx <- top_idx[i]
+    cat(sprintf("  %d. %.4f km (LL = %.4f)\n", i, x$bandwidths[idx], x$log_likelihood[idx]))
+  }
+}

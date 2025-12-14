@@ -159,6 +159,38 @@ fixed pilot bandwidth, (2) scale bandwidth at each grid cell inversely
 with the pilot density, ensuring high-density regions get small kernels
 (detail) and sparse regions get large kernels (smoothness).
 
+## Bandwidth Selection
+
+Choosing an appropriate bandwidth is critical for kernel density
+estimation. The `bandwidth_optimize()` function uses **leave-one-out
+cross-validation** to select an optimal bandwidth automatically:
+
+``` r
+# Select optimal bandwidth via cross-validation
+bw_cv <- bandwidth_optimize(
+  pts_vec,
+  bandwidth_min = 10,
+  bandwidth_max = 200,
+  n_bandwidths = 15,
+  verbose = TRUE
+)
+
+# Use selected bandwidth for final density estimate
+dens_optimal <- kde_geodesic(pts_vec, template, bandwidth = bw_cv$bandwidth_opt)
+```
+
+The function evaluates a sequence of candidate bandwidths and computes
+the leave-one-out log-likelihood for each. The bandwidth maximizing
+average log-likelihood is selected. This is statistically principled but
+computationally intensive; for large datasets, consider using fewer
+bandwidth candidates to reduce computation time.
+
+**Quick reference:** Silverman's rule-of-thumb provides a reasonable
+starting point: h = 1.06 * sigma * n^(-1/5) where sigma is the standard
+deviation of coordinates and n is the point count. However,
+cross-validation often selects smaller bandwidths than Silverman's rule,
+particularly for clustered data.
+
 ## References
 
 - Haversine formula: <https://en.wikipedia.org/wiki/Haversine_formula>

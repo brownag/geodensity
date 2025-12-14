@@ -3,6 +3,34 @@ use geo::prelude::*;
 use geo::Point;
 use rayon::prelude::*;
 
+/// Calculate geodesic distance in kilometers using Haversine formula
+///
+/// Computes great-circle distance between two points on Earth using the
+/// Haversine formula. Suitable for all geographic coordinate pairs.
+///
+/// Algorithm: d = 2 * R * asin(sqrt(sin^2((lat2-lat1)/2) + cos(lat1)*cos(lat2)*sin^2((lon2-lon1)/2)))
+/// where R = 6371 km (Earth's mean radius)
+///
+/// @param lon1 Longitude of first point in degrees
+/// @param lat1 Latitude of first point in degrees
+/// @param lon2 Longitude of second point in degrees
+/// @param lat2 Latitude of second point in degrees
+/// @return Distance in kilometers
+fn haversine_distance_km(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
+    const EARTH_RADIUS_KM: f64 = 6371.0;
+    
+    let lat1_rad = lat1.to_radians();
+    let lat2_rad = lat2.to_radians();
+    let delta_lat = (lat2 - lat1).to_radians();
+    let delta_lon = (lon2 - lon1).to_radians();
+    
+    let a = (delta_lat / 2.0).sin().powi(2) +
+            lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    
+    EARTH_RADIUS_KM * c
+}
+
 /// Compute Geodesic Kernel Density Estimate with spatial indexing
 ///
 /// This function calculates kernel density estimates on a geographic grid using geodesic
@@ -291,6 +319,81 @@ fn geodesic_kde_adaptive_rust(
     densities
 }
 
+/// Evaluate leave-one-out cross-validation log-likelihood for multiple bandwidths
+///
+/// Computes the leave-one-out CV score for each bandwidth by iterating through points,
+/// computing density at each point using all OTHER points, and averaging log-likelihoods.
+/// This is computationally expensive but provides unbiased bandwidth selection.
+///
+/// Returns a vector of log-likelihood scores, one per bandwidth.
+///
+/// @param x_coords Vector of X (longitude) coordinates of data points
+/// @param y_coords Vector of Y (latitude) coordinates of data points
+/// @param bandwidths Vector of bandwidth values (in km) to evaluate
+/// @return Vector of log-likelihood scores (one per bandwidth)
+#[extendr]
+fn bandwidth_loocv_evaluate(
+    x_coords: Vec<f64>,
+    y_coords: Vec<f64>,
+    bandwidths: Vec<f64>,
+) -> Vec<f64> {
+    let n_points = x_coords.len();
+    if n_points == 0 || bandwidths.is_empty() {
+        return vec![];
+    }
+
+    // Precompute all pairwise distances (expensive but needed for LOOCV)
+    let mut distances = vec![vec![0.0; n_points]; n_points];
+    
+    for i in 0..n_points {
+        for j in (i + 1)..n_points {
+            let dist = haversine_distance_km(
+                x_coords[i], y_coords[i],
+                x_coords[j], y_coords[j]
+            );
+            distances[i][j] = dist;
+            distances[j][i] = dist;
+        }
+    }
+
+    // Evaluate each bandwidth
+    let log_likelihoods: Vec<f64> = bandwidths
+        .iter()
+        .map(|&bw| {
+            // For this bandwidth, compute LOOCV score
+            let mut log_lik_sum = 0.0;
+            let epsilon = 1e-10;
+            
+            // Normalization constant for 2D Gaussian kernel on sphere
+            // Using Silverman's normalization: 1 / (2 * pi * bw^2) for geographic space
+            let kernel_norm = 1.0 / (2.0 * std::f64::consts::PI * bw * bw);
+
+            for test_idx in 0..n_points {
+                // Compute density at test_idx using all OTHER points
+                let mut density = 0.0;
+
+                for j in 0..n_points {
+                    if j == test_idx {
+                        continue; // Leave-one-out: exclude self
+                    }
+
+                    let dist_km = distances[test_idx][j];
+                    let kernel_val = kernel_norm * (-0.5 * (dist_km / bw).powi(2)).exp();
+                    density += kernel_val;
+                }
+
+                // Add log-likelihood for this point (avoid log(0))
+                log_lik_sum += (density.max(epsilon)).ln();
+            }
+
+            // Return average log-likelihood for this bandwidth
+            log_lik_sum / n_points as f64
+        })
+        .collect();
+
+    log_likelihoods
+}
+
 // Macro to generate exports.
 // This ensures exported functions are registered with R.
 // See corresponding C code in `entrypoint.c`.
@@ -298,4 +401,5 @@ extendr_module! {
     mod geodensity;
     fn geodesic_kde_rust;
     fn geodesic_kde_adaptive_rust;
+    fn bandwidth_loocv_evaluate;
 }

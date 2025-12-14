@@ -39,5 +39,17 @@ geodesic_kde_rust <- function(x_coords, y_coords, grid_x, grid_y, bandwidth_km) 
 #' @noRd
 geodesic_kde_adaptive_rust <- function(x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km) .Call(wrap__geodesic_kde_adaptive_rust, x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km)
 
+#' Evaluate Leave-One-Out Cross-Validation Log-Likelihood for Multiple Bandwidths
+#'
+#' Computes the leave-one-out CV score for each bandwidth by computing density at each
+#' point using all OTHER points, then averaging log-likelihoods.
+#'
+#' @param x_coords Vector of X (longitude) coordinates of data points
+#' @param y_coords Vector of Y (latitude) coordinates of data points
+#' @param bandwidths Vector of bandwidth values (in km) to evaluate
+#' @return Vector of log-likelihood scores (one per bandwidth)
+#' @noRd
+bandwidth_loocv_evaluate <- function(x_coords, y_coords, bandwidths) .Call(wrap__bandwidth_loocv_evaluate, x_coords, y_coords, bandwidths)
+
 
 # nolint end
