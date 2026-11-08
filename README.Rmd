@@ -121,7 +121,17 @@ Runtime depends on grid resolution, the number of input points, and bandwidth. T
 
 ## Adaptive Bandwidth
 
-For datasets with highly variable point density, the `kde_adaptive()` function shrinks the bandwidth where local density is high, bounded between `min_bandwidth` and `pilot_bandwidth`, producing finer detail in high-density regions and smoother estimates in sparse regions. This "balloon estimator" approach often yields better results for multi-scale point patterns (e.g., urban centers surrounded by sparse rural areas, marine hotspots in vast oceans).
+For datasets with highly variable point density, `kde_adaptive()` offers two methods:
+`"balloon"` (the default) varies bandwidth by evaluation grid cell, while
+`"sample_point"` varies it by input data point. The `scaling` option selects
+`"ratio"` (the default) or `"linear_sqrt"`. With positive `d_max`, ratio scaling
+ranges from `(min_bandwidth + pilot_bandwidth) / 2` to `pilot_bandwidth`—27.5 to
+50 km when `min_bandwidth = 5` and `pilot_bandwidth = 50`—while linear-sqrt scaling
+spans the full `[min_bandwidth, pilot_bandwidth]` range. Balloon estimates are
+normalized locally per grid cell and are not guaranteed to have unit mass;
+sample-point estimates normalize each input point's kernel and integrate to
+approximately 1. Both methods can provide finer detail in dense regions and
+smoother estimates in sparse regions.
 
 ```{r adaptive}
 # Create sample data with variable density
@@ -154,7 +164,15 @@ plot(dens_adaptive, main = "Adaptive Bandwidth")
 plot(dens_fixed - dens_adaptive, main = "Difference")
 ```
 
-The algorithm uses a two-pass approach: (1) compute initial density with fixed pilot bandwidth, (2) scale the bandwidth at each grid cell as `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is the pilot density at the cell and `d_max` is the maximum pilot density over the template grid. The per-cell bandwidth lies in `[min_bandwidth, pilot_bandwidth]`: high-density cells get bandwidths near the minimum (detail), sparse cells get bandwidths near the pilot (smoothness). Because `d_max` is taken over the template, the same points on a different template can yield different bandwidths.
+For the default `method = "balloon"` and `scaling = "ratio"`, the pilot density is
+computed on the template grid and each cell's bandwidth is
+`bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is the pilot
+density at the cell and `d_max` is the maximum over that grid. The same points on
+a different template can therefore yield different balloon bandwidths. With
+`method = "sample_point"`, pilot density and bandwidths are instead evaluated
+at the input points, independently of template extent. Balloon normalization is
+per cell and does not guarantee unit total mass; sample-point kernels are
+normalized per input point and integrate to approximately 1.
 
 ## Bandwidth Selection
 
@@ -177,7 +195,11 @@ plot(dens_optimal, main = paste("KDE with CV-selected bandwidth:", round(bw_cv$b
 
 The function evaluates a sequence of candidate bandwidths and computes the leave-one-out log-likelihood for each. The bandwidth maximizing average log-likelihood is selected. This is statistically principled but computationally intensive; for large datasets, consider using fewer bandwidth candidates to reduce computation time.
 
-**Quick reference:** Silverman's rule-of-thumb provides a reasonable starting point: h = 1.06 * sigma * n^(-1/5) where sigma is the standard deviation of coordinates and n is the point count. However, cross-validation often selects smaller bandwidths than Silverman's rule, particularly for clustered data.
+**Quick reference:** The two-dimensional normal reference rule provides a
+reasonable starting point: `h = sigma_km * n^(-1/6)`, where `sigma_km` is the
+root-mean-square standard deviation of the point coordinates converted to
+kilometres (not degrees), and `n` is the point count. Cross-validation often
+selects smaller bandwidths than this rule, particularly for clustered data.
 
 ## References
 
