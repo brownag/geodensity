@@ -62,8 +62,9 @@ fn geodesic_kde_rust(
     let search_radius_lon_deg = search_radius_km / km_per_lon_degree.abs().max(0.1);
     let search_radius_lat_deg = search_radius_km / km_per_lat_degree;
     
-    // Use smaller radius for safety (guarantees we find neighbors)
-    let search_radius_deg = search_radius_lon_deg.min(search_radius_lat_deg);
+    // Use larger radius so the box covers 3 * bandwidth in both lon and lat
+    // (at high latitude the lon radius is the larger one)
+    let search_radius_deg = search_radius_lon_deg.max(search_radius_lat_deg);
     
     // Index cell size: 1.5x the search radius (ensures 2-3 layers of adjacent cells)
     // This prevents missing neighbors at cell boundaries
@@ -220,7 +221,7 @@ fn geodesic_kde_adaptive_rust(
     let search_radius_km = 3.0 * pilot_bandwidth_km;
     let search_radius_lon_deg = search_radius_km / km_per_lon_degree.abs().max(0.1);
     let search_radius_lat_deg = search_radius_km / km_per_lat_degree;
-    let search_radius_deg = search_radius_lon_deg.min(search_radius_lat_deg);
+    let search_radius_deg = search_radius_lon_deg.max(search_radius_lat_deg);
     let index_cell_size = (search_radius_deg * 1.5).max(0.1).min(45.0);
 
     let mut grid_index: std::collections::HashMap<(i32, i32), Vec<usize>> =
