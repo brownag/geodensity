@@ -432,6 +432,12 @@ bandwidth_optimize <- function(
   }
 
   # Validate bandwidth parameters
+  if (length(bandwidth_min) != 1) {
+    stop("bandwidth_min must be a single number")
+  }
+  if (length(bandwidth_max) != 1) {
+    stop("bandwidth_max must be a single number")
+  }
   if (!is.numeric(bandwidth_min) || bandwidth_min <= 0) {
     stop("bandwidth_min must be positive")
   }

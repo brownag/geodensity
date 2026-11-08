@@ -688,6 +688,78 @@ t4_explicit <- terra::values(kde_adaptive(t1_pts, t1_tpl, pilot_bandwidth = 150,
 expect_identical(t4_default, t4_explicit, info = "default min_bandwidth equals 0.1 * pilot")
 
 # =============================================================================
+# Test 34-series: LOOCV and S7 checks (task 5.1.4)
+# =============================================================================
+
+# Test 34a: LOOCV floor. Two points ~9000 km apart with bw = 1: every leave-one-out
+# density is exp(-0.5 * 9000^2) = 0, so each point is floored to 1e-10 and the mean is log(1e-10).
+expect_equal(
+  geodensity:::bandwidth_loocv_evaluate(c(-100, -20), c(40, 0), 1),
+  log(1e-10),
+  tolerance = 1e-12,
+  info = "LOOCV floor: all densities 0, floored to 1e-10"
+)
+
+# Test 34b: LOOCV score scale vs brute force at one bandwidth.
+# Uses the intensity normalization 1/(2*pi*bw^2) that LOOCV keeps (D10). It is NOT the KDE
+# probability-density normalization (divide by n), which is task 5.1.5. No 3*bw cutoff, as in Rust.
+set.seed(5414)
+b34_x <- rnorm(12, -100, 2)
+b34_y <- rnorm(12, 40, 2)
+b34_pts <- terra::vect(data.frame(lon = b34_x, lat = b34_y), geom = c("lon", "lat"), crs = "EPSG:4326")
+b34_res <- bandwidth_optimize(b34_pts, bandwidth_min = 50, bandwidth_max = 100,
+                              n_bandwidths = 2, verbose = FALSE)
+b34_bw <- b34_res$bandwidths[1]
+b34_dens <- vapply(seq_along(b34_x), function(i) {
+  d <- bf_haversine_km(b34_x[-i], b34_y[-i], b34_x[i], b34_y[i])
+  sum((1 / (2 * pi * b34_bw^2)) * exp(-0.5 * (d / b34_bw)^2))
+}, numeric(1))
+expect_true(all(b34_dens > 1e-10), info = "LOOCV score scale: no density hits the floor")
+b34_brute <- mean(log(pmax(b34_dens, 1e-10)))
+expect_equal(b34_res$log_likelihood[1], b34_brute, tolerance = 1e-10,
+             info = "LOOCV score scale matches brute force (intensity normalization)")
+
+# Test 34c: S7 print header and optimal line.
+b34_out <- capture.output(print(b34_res))
+expect_true(any(grepl("Bandwidth Cross-Validation Results", b34_out)),
+            info = "print.bandwidth_cv: header")
+expect_true(any(grepl("Optimal bandwidth", b34_out)),
+            info = "print.bandwidth_cv: optimal line")
+
+# Test 34d: S7 verbose output marks the optimum.
+b34_verbose <- capture.output(
+  bandwidth_optimize(b34_pts, bandwidth_min = 50, bandwidth_max = 100,
+                     n_bandwidths = 2, verbose = TRUE)
+)
+expect_true(any(grepl("OPTIMAL", b34_verbose)), info = "verbose = TRUE prints OPTIMAL")
+
+# Test 34e: S7 validation errors.
+expect_error(
+  bandwidth_optimize(b34_pts, bandwidth_min = 50, bandwidth_max = 10, verbose = FALSE),
+  "bandwidth_max must be greater than bandwidth_min",
+  info = "bandwidth_max <= bandwidth_min errors"
+)
+expect_error(
+  bandwidth_optimize(b34_pts, bandwidth_min = 50, bandwidth_max = 100,
+                     n_bandwidths = 1.5, verbose = FALSE),
+  "n_bandwidths must be an integer",
+  info = "n_bandwidths = 1.5 errors"
+)
+
+# Test 34f: S10 scalar checks. Length-2 bandwidth_min and bandwidth_max must error, naming the argument.
+expect_error(
+  bandwidth_optimize(b34_pts, bandwidth_min = c(1, 2), bandwidth_max = 50, verbose = FALSE),
+  "bandwidth_min must be a single number",
+  info = "length-2 bandwidth_min errors"
+)
+expect_error(
+  bandwidth_optimize(b34_pts, bandwidth_min = 1, bandwidth_max = c(10, 50), verbose = FALSE),
+  "bandwidth_max must be a single number",
+  info = "length-2 bandwidth_max errors"
+)
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 # All tests completed
