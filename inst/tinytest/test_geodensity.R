@@ -487,6 +487,25 @@ bf_adaptive <- function(x, y, gx, gy, pilot, min_bw) {
   }, numeric(1))
 }
 
+# Normalized fixed reference: probability density, bf_fixed / (2 * pi * bw^2 * n)
+bf_fixed_norm <- function(x, y, gx, gy, bw) {
+  bf_fixed(x, y, gx, gy, bw) / (2 * pi * bw^2 * length(x))
+}
+
+# Normalized adaptive reference: returns per-cell density / (2 * pi * scale^2 * n) and the scale
+bf_adaptive_norm <- function(x, y, gx, gy, pilot, min_bw) {
+  p <- bf_fixed(x, y, gx, gy, pilot)
+  dmax <- max(p)
+  ratio <- if (dmax > 0) p / dmax else rep(0, length(p))
+  scale <- min_bw + (pilot - min_bw) / (1 + sqrt(ratio))
+  raw <- vapply(seq_along(gx), function(i) {
+    d <- bf_haversine_km(x, y, gx[i], gy[i])
+    keep <- d < 3 * scale[i]
+    sum(exp(-0.5 * (d[keep] / scale[i])^2))
+  }, numeric(1))
+  list(density = raw / (2 * pi * scale^2 * length(x)), scale = scale)
+}
+
 # Relative comparison at 1e-10 per element. Where the reference is 0, the result must be 0.
 bf_expect <- function(res, ref, info) {
   expect_equal(length(res), length(ref), info = paste(info, "length"))
@@ -503,11 +522,11 @@ ha_gx <- rep(seq(-120, -40, length.out = 13), 9)
 ha_gy <- rep(seq(-60, 75, length.out = 9), each = 13)
 for (bw in c(40, 250)) {
   bf_expect(geodesic_kde_rust(ha_x, ha_y, ha_gx, ha_gy, bw),
-            bf_fixed(ha_x, ha_y, ha_gx, ha_gy, bw),
+            bf_fixed_norm(ha_x, ha_y, ha_gx, ha_gy, bw),
             sprintf("fixed heterogeneous bw=%g", bw))
 }
 bf_expect(geodesic_kde_adaptive_rust(ha_x, ha_y, ha_gx, ha_gy, 150, 15),
-          bf_adaptive(ha_x, ha_y, ha_gx, ha_gy, 150, 15),
+          bf_adaptive_norm(ha_x, ha_y, ha_gx, ha_gy, 150, 15)$density,
           "adaptive heterogeneous pilot=150 min=15")
 
 # Case B: dateline-crossing set, data and grid on both sides of +/-180 at lat 68-76
@@ -518,11 +537,11 @@ hb_gx <- c(runif(20, 170, 180), runif(20, -180, -170), 179.5, -179.5, 180, -180)
 hb_gy <- c(runif(40, 68, 76), rep(72, 4))
 for (bw in c(60, 120)) {
   bf_expect(geodesic_kde_rust(hb_x, hb_y, hb_gx, hb_gy, bw),
-            bf_fixed(hb_x, hb_y, hb_gx, hb_gy, bw),
+            bf_fixed_norm(hb_x, hb_y, hb_gx, hb_gy, bw),
             sprintf("fixed dateline bw=%g", bw))
 }
 bf_expect(geodesic_kde_adaptive_rust(hb_x, hb_y, hb_gx, hb_gy, 120, 12),
-          bf_adaptive(hb_x, hb_y, hb_gx, hb_gy, 120, 12),
+          bf_adaptive_norm(hb_x, hb_y, hb_gx, hb_gy, 120, 12)$density,
           "adaptive dateline pilot=120 min=12")
 
 # Case C: contributors at 0.9x, 0.999x, 1.1x the cutoff, due north (0) and due east (90),
@@ -536,7 +555,7 @@ for (cx in list(c(-100, 40), c(-60, 65))) {
     pts <- rbind(pts, dst)
   }
   bf_expect(geodesic_kde_rust(pts[, 1], pts[, 2], cx[1], cx[2], 50),
-            bf_fixed(pts[, 1], pts[, 2], cx[1], cx[2], 50),
+            bf_fixed_norm(pts[, 1], pts[, 2], cx[1], cx[2], 50),
             sprintf("fixed cutoff-band lat=%g bw=50", cx[2]))
   # Adaptive, one grid cell: ratio = 1, so scale = min + (pilot - min)/2 = 37.5 km (pilot 50, min 25)
   pts_a <- NULL
@@ -544,7 +563,7 @@ for (cx in list(c(-100, 40), c(-60, 65))) {
     pts_a <- rbind(pts_a, bf_destination(cx[1], cx[2], f * 3 * 37.5, b))
   }
   bf_expect(geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25),
-            bf_adaptive(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25),
+            bf_adaptive_norm(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25)$density,
             sprintf("adaptive cutoff-band lat=%g", cx[2]))
 }
 
@@ -562,10 +581,10 @@ for (bw in c(40, 90)) {
   lat_b <- as.vector(outer(seq(floor(-60 / ct), ceiling(75 / ct)) * ct, off, "+"))
   g <- expand.grid(gx = lon_b, gy = lat_b)
   bf_expect(geodesic_kde_rust(hd_x, hd_y, g$gx, g$gy, bw),
-            bf_fixed(hd_x, hd_y, g$gx, g$gy, bw),
+            bf_fixed_norm(hd_x, hd_y, g$gx, g$gy, bw),
             sprintf("fixed index-boundary bw=%g", bw))
   bf_expect(geodesic_kde_adaptive_rust(hd_x, hd_y, g$gx, g$gy, 150, 15),
-            bf_adaptive(hd_x, hd_y, g$gx, g$gy, 150, 15),
+            bf_adaptive_norm(hd_x, hd_y, g$gx, g$gy, 150, 15)$density,
             "adaptive index-boundary pilot=150 min=15")
 }
 
@@ -589,19 +608,19 @@ for (lat0 in c(40, 65)) {
     pts_e <- rbind(pts_e, dst)
   }
   bf_expect(geodesic_kde_rust(pts_e[, 1], pts_e[, 2], -100, lat0, 50),
-            bf_fixed(pts_e[, 1], pts_e[, 2], -100, lat0, 50),
+            bf_fixed_norm(pts_e[, 1], pts_e[, 2], -100, lat0, 50),
             sprintf("fixed tangent-east lat=%g bw=50", lat0))
   # Adaptive, single grid cell: scale = 37.5 km (pilot 50, min 25), cutoff 112.5 km
   b_ta <- bf_tangent_bearing(lat0, 3 * 37.5)
   pts_a <- NULL
   for (f in c(0.9996, 0.9999)) pts_a <- rbind(pts_a, bf_destination(-100, lat0, f * 3 * 37.5, b_ta))
   bf_expect(geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25),
-            bf_adaptive(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25),
+            bf_adaptive_norm(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25)$density,
             sprintf("adaptive tangent-east lat=%g", lat0))
 }
 dst_n <- bf_destination(-100, 65, 0.9996 * 150, 0)
 bf_expect(geodesic_kde_rust(dst_n[1], dst_n[2], -100, 65, 50),
-          bf_fixed(dst_n[1], dst_n[2], -100, 65, 50),
+          bf_fixed_norm(dst_n[1], dst_n[2], -100, 65, 50),
           "fixed north 0.9996 lat=65 bw=50")
 
 # Case F: circle enclosing the pole (grid at lat 89.5, data across the dateline).
@@ -611,10 +630,10 @@ hf_y <- c(89.5, 89.5, 89.7, 89.7, 89.6)
 hf_gx <- c(179, -179, 0)
 hf_gy <- c(89.5, 89.5, 89.5)
 bf_expect(geodesic_kde_rust(hf_x, hf_y, hf_gx, hf_gy, 300),
-          bf_fixed(hf_x, hf_y, hf_gx, hf_gy, 300),
+          bf_fixed_norm(hf_x, hf_y, hf_gx, hf_gy, 300),
           "fixed pole-enclosing bw=300")
 bf_expect(geodesic_kde_adaptive_rust(hf_x, hf_y, hf_gx, hf_gy, 300, 30),
-          bf_adaptive(hf_x, hf_y, hf_gx, hf_gy, 300, 30),
+          bf_adaptive_norm(hf_x, hf_y, hf_gx, hf_gy, 300, 30)$density,
           "adaptive pole-enclosing pilot=300 min=30")
 
 # Case G: index-cell edge with a capped cell. bw = 700 km at lat 65 gives a lon half-width
@@ -624,14 +643,14 @@ bf_expect(geodesic_kde_adaptive_rust(hf_x, hf_y, hf_gx, hf_gy, 300, 30),
 g_b <- bf_tangent_bearing(65, 3 * 700)
 g_d <- bf_destination(-90, 65, 0.9999 * 3 * 700, g_b)
 bf_expect(geodesic_kde_rust(g_d[1], g_d[2], -90 - 1e-9, 65, 700),
-          bf_fixed(g_d[1], g_d[2], -90 - 1e-9, 65, 700),
+          bf_fixed_norm(g_d[1], g_d[2], -90 - 1e-9, 65, 700),
           "fixed cell-edge tangent 0.9999x bw=700 lat=65")
 # Adaptive: min = 0.999 * pilot, so scale = min + (pilot - min)/2 (single cell, ratio 1)
 g_s <- 699.3 + (700 - 699.3) / 2
 g_ba <- bf_tangent_bearing(65, 3 * g_s)
 g_da <- bf_destination(-90, 65, 0.9999 * 3 * g_s, g_ba)
 bf_expect(geodesic_kde_adaptive_rust(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3),
-          bf_adaptive(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3),
+          bf_adaptive_norm(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3)$density,
           "adaptive cell-edge tangent 0.9999x pilot=700 lat=65")
 
 # =============================================================================
@@ -648,7 +667,7 @@ t1_pts <- terra::vect(data.frame(lon = t1_x, lat = t1_y), geom = c("lon", "lat")
 t1_tpl <- terra::rast(extent = c(-105, -95, 35, 45), resolution = 1, crs = "OGC:CRS84")
 t1_grid <- terra::xyFromCell(t1_tpl, 1:terra::ncell(t1_tpl))
 t1_out <- terra::values(kde_adaptive(t1_pts, t1_tpl, pilot_bandwidth = 150, min_bandwidth = 15))[, 1]
-t1_ref <- bf_adaptive(t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150, 15)
+t1_ref <- bf_adaptive_norm(t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150, 15)$density
 bf_expect(t1_out, t1_ref, "adaptive scaling formula pilot=150 min=15")
 t1_pilot <- bf_fixed(t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150)
 t1_dmax <- max(t1_pilot)

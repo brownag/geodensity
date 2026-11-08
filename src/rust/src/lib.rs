@@ -145,7 +145,9 @@ fn geodesic_kde_rust(
         })
         .collect();
 
-    densities
+    // Normalize to probability density: divide by 2*pi*bw^2*n (after accumulation)
+    let norm = 2.0 * std::f64::consts::PI * bandwidth_km * bandwidth_km * x_coords.len() as f64;
+    densities.iter().map(|&d| d / norm).collect()
 }
 
 /// Compute Adaptive Geodesic Kernel Density Estimate
@@ -299,7 +301,13 @@ fn geodesic_kde_adaptive_rust(
         })
         .collect();
 
+    // Normalize to probability density: divide by 2*pi*scale_i^2*n per cell (after accumulation)
+    let n = x_coords.len() as f64;
     densities
+        .iter()
+        .zip(scales.iter())
+        .map(|(&d, &s)| d / (2.0 * std::f64::consts::PI * s * s * n))
+        .collect()
 }
 
 /// Evaluate leave-one-out cross-validation log-likelihood for multiple bandwidths
