@@ -2,7 +2,7 @@
 #'
 #' Computes kernel density estimates on a geographic grid using geodesic (great-circle)
 #' distances. This function is optimized for large datasets and automatically parallelizes
-#' the computation across available CPU cores using Rust's Rayon library.
+#' the computation across available CPU cores in the Rust backend.
 #'
 #' The bandwidth parameter controls the smoothing level. It is specified in kilometers
 #' and represents the standard deviation of the Gaussian kernel. Larger values produce
@@ -21,7 +21,11 @@
 #'
 #' @return A `SpatRaster` containing the kernel density estimates at each grid cell.
 #'   Values represent the density of input points, with higher values indicating
-#'   concentrated clustering and lower values indicating sparse regions.
+#'   concentrated clustering and lower values indicating sparse regions. Values are
+#'   probability density per square kilometre: the kernel sum divided by
+#'   `2 * pi * bandwidth^2 * n`, where `n` is the number of input points. This is a
+#'   planar approximation. The values integrate to approximately 1 over the plane, not
+#'   exactly, because of the spherical metric and the 3 * bandwidth kernel truncation.
 #'
 #' @import terra
 #'
@@ -148,8 +152,10 @@ kde_geodesic <- function(x, r, bandwidth) {
 #'
 #' The algorithm uses a two-pass approach:
 #' 1. Compute pilot density with fixed `pilot_bandwidth`
-#' 2. Scale bandwidth per grid cell as: `pilot_bandwidth / sqrt(pilot_density)`,
-#'    clamped to `[min_bandwidth, pilot_bandwidth]`
+#' 2. Scale bandwidth per grid cell as
+#'    `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is the pilot
+#'    density at the cell and `d_max` is the maximum pilot density over the template
+#'    grid. The result lies in `[min_bandwidth, pilot_bandwidth]`.
 #' 3. Compute final density using the scaled per-cell bandwidths
 #'
 #' @param x A `SpatVector` or `sf` object containing points in geographic coordinates
@@ -168,6 +174,11 @@ kde_geodesic <- function(x, r, bandwidth) {
 #'
 #' @return A `SpatRaster` containing the adaptive kernel density estimates at each grid cell.
 #'   Values represent the density of input points computed with locally-scaled kernels.
+#'   Values are probability density per square kilometre: the kernel sum divided by
+#'   `2 * pi * bw_i^2 * n`, where `bw_i` is the per-cell bandwidth and `n` is the number
+#'   of input points. This is a planar approximation. The values integrate to approximately
+#'   1 over the plane, not exactly, because of the spherical metric and the 3 * bw_i
+#'   kernel truncation.
 #'
 #' @import terra
 #'
@@ -185,6 +196,12 @@ kde_geodesic <- function(x, r, bandwidth) {
 #' - Better visual detail in dense regions (smaller bandwidth where points cluster)
 #' - Less over-smoothing of isolated features (larger bandwidth in sparse regions)
 #' - Often better statistical properties for heterogeneous point patterns
+#'
+#' ## Grid Dependence
+#'
+#' The per-cell bandwidth depends on the template raster. The pilot density is evaluated
+#' on the template cells and `d_max` is the template maximum, so the same points on a
+#' different template can yield different bandwidths.
 #'
 #' @examples
 #' \donttest{
@@ -286,7 +303,10 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
 
   message(
     sprintf(
-      "Computing adaptive geodesic KDE: %d points, %d grid cells, %.1f km pilot bandwidth, %.1f km min bandwidth",
+      paste0(
+        "Computing adaptive geodesic KDE: %d points, %d grid cells, ",
+        "%.1f km pilot bandwidth, %.1f km min bandwidth"
+      ),
       nrow(pts), terra::ncell(r), pilot_bandwidth, min_bandwidth
     )
   )
@@ -338,7 +358,10 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
 #'
 #' @return A list with class `bandwidth_cv` containing:
 #'   - `bandwidth_opt`: Optimal bandwidth in kilometers (numeric scalar)
-#'   - `log_likelihood`: Log-likelihood scores for each bandwidth candidate
+#'   - `log_likelihood`: Log-likelihood scores for each bandwidth candidate. These use
+#'     the intensity normalization `1 / (2 * pi * bandwidth^2)` (no division by n), so
+#'     they are on an absolute scale that differs from `kde_*` output by a constant
+#'     `log(n)`. Compare them across bandwidths only.
 #'   - `bandwidths`: Bandwidth values evaluated
 #'   - `n_points`: Number of points evaluated
 #'
@@ -353,9 +376,19 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
 #'    b. Average the log-likelihoods across all test points
 #' 2. Select the bandwidth maximizing average log-likelihood
 #'
-#' LOOCV is unbiased but computationally expensive. The computation is parallelized
-#' in the Rust backend via Rayon. For datasets with >5000 points, consider using
-#' fewer bandwidth candidates (n_bandwidths = 5-8) for faster results.
+#' LOOCV is unbiased but computationally expensive. The Rust backend runs the LOOCV
+#' loops serially. For datasets with >5000 points, consider using fewer bandwidth
+#' candidates (n_bandwidths = 5-8) for faster results.
+#'
+#' Each leave-one-out density is floored at 1e-10 before taking the log, so a point with
+#' zero density under a bandwidth does not produce `-Inf`.
+#'
+#' The backend precomputes an n-by-n matrix of pairwise distances, so memory use grows as
+#' O(n^2). The loops also cost O(n^2) per bandwidth candidate.
+#'
+#' The log-likelihood uses the intensity normalization `1 / (2 * pi * bandwidth^2)`, with
+#' no division by n. Its values therefore differ from `kde_*` output by a constant `log(n)`.
+#' Only the ranking across bandwidths is meaningful for choosing a bandwidth.
 #'
 #' ## Relationship to Silverman's Rule
 #'
@@ -455,7 +488,10 @@ bandwidth_optimize <- function(
   bandwidths <- exp(seq(log(bandwidth_min), log(bandwidth_max), length.out = n_bandwidths))
 
   if (verbose) {
-    cat(sprintf("Evaluating %d bandwidth values via leave-one-out cross-validation...\n", n_bandwidths))
+    cat(sprintf(
+      "Evaluating %d bandwidth values via leave-one-out cross-validation...\n",
+      n_bandwidths
+    ))
   }
 
   # Call Rust backend for LOOCV evaluation
