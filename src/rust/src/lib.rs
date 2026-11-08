@@ -27,6 +27,48 @@ fn search_half_widths_deg(cutoff_km: f64, lat_deg: f64) -> (f64, f64) {
     (lon_hw, lat_hw)
 }
 
+/// Index cell size in degrees: 1.5x the largest search half-width over the grid latitudes at
+/// `cutoff_km`, bounded to [0.1, 45] degrees to prevent pathological cases.
+fn index_cell_size(grid_y: &[f64], cutoff_km: f64) -> f64 {
+    let max_half_width_deg = grid_y
+        .iter()
+        .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
+        .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
+    (max_half_width_deg * 1.5)
+        .max(0.1)
+        .min(45.0)
+}
+
+/// Grid-cell index of the points with dateline-aware keys: each point is stored under its
+/// natural key and, if |x| > 90, also under its key wrapped by 360 degrees.
+fn build_spatial_index(
+    data_points: &[Point<f64>],
+    cell_size: f64,
+) -> std::collections::HashMap<(i32, i32), Vec<usize>> {
+    let mut grid_index: std::collections::HashMap<(i32, i32), Vec<usize>> =
+        std::collections::HashMap::new();
+
+    for (idx, point) in data_points.iter().enumerate() {
+        let x_key = (point.x() / cell_size).floor() as i32;
+        let y_key = (point.y() / cell_size).floor() as i32;
+
+        grid_index.entry((x_key, y_key)).or_insert_with(Vec::new).push(idx);
+
+        // Wrap positive values near +180 to negative equivalent, and vice versa
+        if point.x() > 90.0 {
+            let wrapped_x = point.x() - 360.0;
+            let wrapped_key = (wrapped_x / cell_size).floor() as i32;
+            grid_index.entry((wrapped_key, y_key)).or_insert_with(Vec::new).push(idx);
+        } else if point.x() < -90.0 {
+            let wrapped_x = point.x() + 360.0;
+            let wrapped_key = (wrapped_x / cell_size).floor() as i32;
+            grid_index.entry((wrapped_key, y_key)).or_insert_with(Vec::new).push(idx);
+        }
+    }
+    grid_index
+}
+
+
 /// Geodesic kernel density estimate on a grid, with grid-based spatial indexing.
 /// The grid points are computed in parallel with Rayon.
 #[extendr]
@@ -48,43 +90,10 @@ fn geodesic_kde_rust(
     // point's own latitude (search_half_widths_deg). The cell size covers the largest
     // half-width over the grid, so per-point cell offsets stay bounded.
     let cutoff_km = 3.0 * bandwidth_km;
-    let max_half_width_deg = grid_y
-        .iter()
-        .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
-        .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
+    let index_cell_size = index_cell_size(&grid_y, cutoff_km);
 
-    // Index cell size: 1.5x the largest half-width
-    // Bounded at [0.1 degrees, 45 degrees] to prevent pathological cases
-    let index_cell_size = (max_half_width_deg * 1.5)
-        .max(0.1)
-        .min(45.0);
-    
     // 3. Build spatial grid index with dynamic cell size
-    // Use a multi-key approach for dateline-aware indexing
-    let mut grid_index: std::collections::HashMap<(i32, i32), Vec<usize>> = 
-        std::collections::HashMap::new();
-    
-    for (idx, point) in data_points.iter().enumerate() {
-        let x_key = (point.x() / index_cell_size).floor() as i32;
-        let y_key = (point.y() / index_cell_size).floor() as i32;
-        
-        // Add point to its natural cell
-        grid_index.entry((x_key, y_key)).or_insert_with(Vec::new).push(idx);
-        
-        // For dateline handling: also add to wrapped position if near +/-180
-        // This ensures points near -180 can be found when querying near +180
-        if point.x() > 90.0 {
-            // Wrap positive values near +180 to negative equivalent
-            let wrapped_x = point.x() - 360.0;
-            let wrapped_key = (wrapped_x / index_cell_size).floor() as i32;
-            grid_index.entry((wrapped_key, y_key)).or_insert_with(Vec::new).push(idx);
-        } else if point.x() < -90.0 {
-            // Wrap negative values near -180 to positive equivalent
-            let wrapped_x = point.x() + 360.0;
-            let wrapped_key = (wrapped_x / index_cell_size).floor() as i32;
-            grid_index.entry((wrapped_key, y_key)).or_insert_with(Vec::new).push(idx);
-        }
-    }
+    let grid_index = build_spatial_index(&data_points, index_cell_size);
 
     // 5. Parallel iteration over the output grid (pixels)
     let densities: Vec<f64> = grid_x
@@ -189,40 +198,8 @@ fn geodesic_kde_adaptive_rust(
     // Index and search extent use the pilot bandwidth. Every per-cell cutoff 3*scale is
     // at most 3*pilot, because scale <= pilot_bandwidth_km when min < pilot.
     let cutoff_km = 3.0 * pilot_bandwidth_km;
-    let max_half_width_deg = grid_y
-        .iter()
-        .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
-        .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
-    let index_cell_size = (max_half_width_deg * 1.5).max(0.1).min(45.0);
-
-    let mut grid_index: std::collections::HashMap<(i32, i32), Vec<usize>> =
-        std::collections::HashMap::new();
-
-    for (idx, point) in data_points.iter().enumerate() {
-        let x_key = (point.x() / index_cell_size).floor() as i32;
-        let y_key = (point.y() / index_cell_size).floor() as i32;
-
-        grid_index
-            .entry((x_key, y_key))
-            .or_insert_with(Vec::new)
-            .push(idx);
-
-        if point.x() > 90.0 {
-            let wrapped_x = point.x() - 360.0;
-            let wrapped_key = (wrapped_x / index_cell_size).floor() as i32;
-            grid_index
-                .entry((wrapped_key, y_key))
-                .or_insert_with(Vec::new)
-                .push(idx);
-        } else if point.x() < -90.0 {
-            let wrapped_x = point.x() + 360.0;
-            let wrapped_key = (wrapped_x / index_cell_size).floor() as i32;
-            grid_index
-                .entry((wrapped_key, y_key))
-                .or_insert_with(Vec::new)
-                .push(idx);
-        }
-    }
+    let index_cell_size = index_cell_size(&grid_y, cutoff_km);
+    let grid_index = build_spatial_index(&data_points, index_cell_size);
 
 
     // Parallel computation using scaled bandwidths
