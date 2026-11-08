@@ -27,19 +27,8 @@ fn search_half_widths_deg(cutoff_km: f64, lat_deg: f64) -> (f64, f64) {
     (lon_hw, lat_hw)
 }
 
-/// Compute Geodesic Kernel Density Estimate with spatial indexing
-///
-/// This function calculates kernel density estimates on a geographic grid using geodesic
-/// (great-circle) distances. The computation is parallelized across CPU cores using Rayon,
-/// and uses spatial indexing (grid-based) to avoid computing distances to far-away points.
-///
-/// @param x_coords Vector of X (longitude) coordinates of data points
-/// @param y_coords Vector of Y (latitude) coordinates of data points
-/// @param grid_x Vector of X coordinates for the output grid cells
-/// @param grid_y Vector of Y coordinates for the output grid cells
-/// @param bandwidth_km Bandwidth in kilometers (standard deviation of Gaussian kernel)
-/// @return A vector of density values corresponding to the grid points
-/// @keywords internal
+/// Geodesic kernel density estimate on a grid, with grid-based spatial indexing.
+/// The grid points are computed in parallel with Rayon.
 #[extendr]
 fn geodesic_kde_rust(
     x_coords: Vec<f64>,
@@ -97,7 +86,6 @@ fn geodesic_kde_rust(
         }
     }
 
-
     // 5. Parallel iteration over the output grid (pixels)
     let densities: Vec<f64> = grid_x
         .par_iter()
@@ -150,26 +138,9 @@ fn geodesic_kde_rust(
     densities.iter().map(|&d| d / norm).collect()
 }
 
-/// Compute Adaptive Geodesic Kernel Density Estimate
-///
-/// This function implements a two-pass adaptive bandwidth algorithm where the bandwidth
-/// at each grid cell is scaled inversely with the pilot density. High-density regions
-/// use smaller bandwidths (detailed), while sparse regions use larger bandwidths (smoother).
-///
-/// Algorithm:
-/// 1. Pass 1: Compute pilot density with fixed pilot_bandwidth_km
-/// 2. Pass 2: Scale bandwidth per grid cell: bandwidth_scaled = pilot_bw / sqrt(pilot_density)
-///           (clamped to [min_bandwidth_km, pilot_bandwidth_km])
-/// 3. Pass 3: Compute final density using scaled bandwidths
-///
-/// @param x_coords Vector of X (longitude) coordinates of data points
-/// @param y_coords Vector of Y (latitude) coordinates of data points
-/// @param grid_x Vector of X coordinates for the output grid cells
-/// @param grid_y Vector of Y coordinates for the output grid cells
-/// @param pilot_bandwidth_km Pilot bandwidth in kilometers (used in Pass 1)
-/// @param min_bandwidth_km Minimum bandwidth in kilometers (lower bound for scaling)
-/// @return A vector of adaptive density values corresponding to the grid points
-/// @keywords internal
+/// Adaptive geodesic kernel density estimate. Per-cell bandwidth is
+/// bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max)), where d_i is the pilot density
+/// at cell i and d_max is the maximum pilot density over the grid.
 #[extendr]
 fn geodesic_kde_adaptive_rust(
     x_coords: Vec<f64>,
@@ -189,13 +160,13 @@ fn geodesic_kde_adaptive_rust(
     );
 
     // Pass 2: Compute scaling factors per grid cell
-    // Adaptive scaling: bandwidth_i = pilot_bw / (1 + (density_i / ref_density)^lambda)
-    // where lambda controls adaptation strength and ref_density is the pilot density max
+    // Adaptive scaling: bandwidth_i = min + (pilot - min) / (1 + (density_i / ref_density)^lambda)
+    // where lambda = 0.5 (sqrt) controls adaptation strength and ref_density is the pilot density max
     // This gives smooth interpolation between min_bw (at high density) and pilot_bw (at zero density)
-    
+
     let reference_density = pilot_density.iter().copied().fold(0.0, f64::max);
     let lambda = 0.5;  // Control adaptation strength
-    
+
     let scales: Vec<f64> = pilot_density
         .iter()
         .map(|&d| {
@@ -310,18 +281,7 @@ fn geodesic_kde_adaptive_rust(
         .collect()
 }
 
-/// Evaluate leave-one-out cross-validation log-likelihood for multiple bandwidths
-///
-/// Computes the leave-one-out CV score for each bandwidth by iterating through points,
-/// computing density at each point using all OTHER points, and averaging log-likelihoods.
-/// This is computationally expensive but provides unbiased bandwidth selection.
-///
-/// Returns a vector of log-likelihood scores, one per bandwidth.
-///
-/// @param x_coords Vector of X (longitude) coordinates of data points
-/// @param y_coords Vector of Y (latitude) coordinates of data points
-/// @param bandwidths Vector of bandwidth values (in km) to evaluate
-/// @return Vector of log-likelihood scores (one per bandwidth)
+/// Leave-one-out CV log-likelihood for each bandwidth (serial; O(n^2) distance matrix).
 #[extendr]
 fn bandwidth_loocv_evaluate(
     x_coords: Vec<f64>,
@@ -332,7 +292,7 @@ fn bandwidth_loocv_evaluate(
 
     // Precompute all pairwise distances (expensive but needed for LOOCV)
     let mut distances = vec![vec![0.0; n_points]; n_points];
-    
+
     for i in 0..n_points {
         for j in (i + 1)..n_points {
             let dist = geo::Point::new(x_coords[i], y_coords[i])
@@ -349,9 +309,9 @@ fn bandwidth_loocv_evaluate(
             // For this bandwidth, compute LOOCV score
             let mut log_lik_sum = 0.0;
             let epsilon = 1e-10;
-            
-            // Normalization constant for 2D Gaussian kernel on sphere
-            // Using Silverman's normalization: 1 / (2 * pi * bw^2) for geographic space
+
+            // 2D Gaussian normalization (planar approximation): 1 / (2 * pi * bw^2).
+            // No 1/n factor: intensity, not probability density (D10).
             let kernel_norm = 1.0 / (2.0 * std::f64::consts::PI * bw * bw);
 
             for test_idx in 0..n_points {
