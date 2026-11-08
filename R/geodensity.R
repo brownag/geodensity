@@ -245,7 +245,14 @@ kde_geodesic <- function(x, r, bandwidth) {
 #' }
 #'
 #' @export
-kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
+kde_adaptive <- function(
+  x,
+  r,
+  pilot_bandwidth,
+  min_bandwidth = NULL,
+  method = c("balloon", "sample_point"),
+  scaling = c("ratio", "linear_sqrt")
+) {
   # 1. Validation and Data Extraction
   if (inherits(x, "sf")) {
     x <- terra::vect(x)
@@ -275,6 +282,9 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
   if (min_bandwidth >= pilot_bandwidth) {
     stop("min_bandwidth must be less than pilot_bandwidth")
   }
+
+  method <- match.arg(method)
+  scaling <- match.arg(scaling)
 
   # Check that input is in geographic (lon/lat) coordinates
   if (!suppressWarnings(terra::is.lonlat(x))) {
@@ -322,7 +332,9 @@ kde_adaptive <- function(x, r, pilot_bandwidth, min_bandwidth = NULL) {
     grid_x = grid_coords[, 1],
     grid_y = grid_coords[, 2],
     pilot_bandwidth_km = pilot_bandwidth,
-    min_bandwidth_km = min_bandwidth
+    min_bandwidth_km = min_bandwidth,
+    method = method,
+    scaling = scaling
   )
 
   # 4. Create a copy of the template raster and assign density values

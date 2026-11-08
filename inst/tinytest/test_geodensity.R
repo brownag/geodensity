@@ -506,6 +506,33 @@ bf_adaptive_norm <- function(x, y, gx, gy, pilot, min_bw) {
   list(density = raw / (2 * pi * scale^2 * length(x)), scale = scale)
 }
 
+bf_adaptive_full <- function(x, y, gx, gy, pilot, min_bw, method, scaling) {
+  pilot_x <- if (method == "sample_point") x else gx
+  pilot_y <- if (method == "sample_point") y else gy
+  p <- bf_fixed(x, y, pilot_x, pilot_y, pilot)
+  dmax <- max(p)
+  ratio <- if (dmax > 0) p / dmax else rep(0, length(p))
+  factor <- if (scaling == "linear_sqrt") 1 - sqrt(ratio) else 1 / (1 + sqrt(ratio))
+  scale <- min_bw + (pilot - min_bw) * factor
+  density <- vapply(seq_along(gx), function(i) {
+    d <- bf_haversine_km(x, y, gx[i], gy[i])
+    if (method == "sample_point") {
+      sum(vapply(seq_along(d), function(j) {
+        if (d[j] < 3 * scale[j]) {
+          exp(-0.5 * (d[j] / scale[j])^2) / (2 * pi * scale[j]^2 * length(x))
+        } else {
+          0
+        }
+      }, numeric(1)))
+    } else {
+      keep <- d < 3 * scale[i]
+      sum(exp(-0.5 * (d[keep] / scale[i])^2)) /
+        (2 * pi * scale[i]^2 * length(x))
+    }
+  }, numeric(1))
+  list(density = density, scale = scale)
+}
+
 # Relative comparison at 1e-10 per element. Where the reference is 0, the result must be 0.
 bf_expect <- function(res, ref, info) {
   expect_equal(length(res), length(ref), info = paste(info, "length"))
@@ -525,7 +552,7 @@ for (bw in c(40, 250)) {
             bf_fixed_norm(ha_x, ha_y, ha_gx, ha_gy, bw),
             sprintf("fixed heterogeneous bw=%g", bw))
 }
-bf_expect(geodensity:::geodesic_kde_adaptive_rust(ha_x, ha_y, ha_gx, ha_gy, 150, 15),
+bf_expect(geodensity:::geodesic_kde_adaptive_rust(ha_x, ha_y, ha_gx, ha_gy, 150, 15, "balloon", "ratio"),
           bf_adaptive_norm(ha_x, ha_y, ha_gx, ha_gy, 150, 15)$density,
           "adaptive heterogeneous pilot=150 min=15")
 
@@ -540,7 +567,7 @@ for (bw in c(60, 120)) {
             bf_fixed_norm(hb_x, hb_y, hb_gx, hb_gy, bw),
             sprintf("fixed dateline bw=%g", bw))
 }
-bf_expect(geodensity:::geodesic_kde_adaptive_rust(hb_x, hb_y, hb_gx, hb_gy, 120, 12),
+bf_expect(geodensity:::geodesic_kde_adaptive_rust(hb_x, hb_y, hb_gx, hb_gy, 120, 12, "balloon", "ratio"),
           bf_adaptive_norm(hb_x, hb_y, hb_gx, hb_gy, 120, 12)$density,
           "adaptive dateline pilot=120 min=12")
 
@@ -562,7 +589,7 @@ for (cx in list(c(-100, 40), c(-60, 65))) {
   for (f in c(0.9, 0.999, 1.1)) for (b in c(0, 90)) {
     pts_a <- rbind(pts_a, bf_destination(cx[1], cx[2], f * 3 * 37.5, b))
   }
-  bf_expect(geodensity:::geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25),
+  bf_expect(geodensity:::geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25, "balloon", "ratio"),
             bf_adaptive_norm(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25)$density,
             sprintf("adaptive cutoff-band lat=%g", cx[2]))
 }
@@ -583,7 +610,7 @@ for (bw in c(40, 90)) {
   bf_expect(geodensity:::geodesic_kde_rust(hd_x, hd_y, g$gx, g$gy, bw),
             bf_fixed_norm(hd_x, hd_y, g$gx, g$gy, bw),
             sprintf("fixed index-boundary bw=%g", bw))
-  bf_expect(geodensity:::geodesic_kde_adaptive_rust(hd_x, hd_y, g$gx, g$gy, 150, 15),
+  bf_expect(geodensity:::geodesic_kde_adaptive_rust(hd_x, hd_y, g$gx, g$gy, 150, 15, "balloon", "ratio"),
             bf_adaptive_norm(hd_x, hd_y, g$gx, g$gy, 150, 15)$density,
             "adaptive index-boundary pilot=150 min=15")
 }
@@ -614,7 +641,7 @@ for (lat0 in c(40, 65)) {
   b_ta <- bf_tangent_bearing(lat0, 3 * 37.5)
   pts_a <- NULL
   for (f in c(0.9996, 0.9999)) pts_a <- rbind(pts_a, bf_destination(-100, lat0, f * 3 * 37.5, b_ta))
-  bf_expect(geodensity:::geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25),
+  bf_expect(geodensity:::geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25, "balloon", "ratio"),
             bf_adaptive_norm(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25)$density,
             sprintf("adaptive tangent-east lat=%g", lat0))
 }
@@ -632,7 +659,7 @@ hf_gy <- c(89.5, 89.5, 89.5)
 bf_expect(geodensity:::geodesic_kde_rust(hf_x, hf_y, hf_gx, hf_gy, 300),
           bf_fixed_norm(hf_x, hf_y, hf_gx, hf_gy, 300),
           "fixed pole-enclosing bw=300")
-bf_expect(geodensity:::geodesic_kde_adaptive_rust(hf_x, hf_y, hf_gx, hf_gy, 300, 30),
+bf_expect(geodensity:::geodesic_kde_adaptive_rust(hf_x, hf_y, hf_gx, hf_gy, 300, 30, "balloon", "ratio"),
           bf_adaptive_norm(hf_x, hf_y, hf_gx, hf_gy, 300, 30)$density,
           "adaptive pole-enclosing pilot=300 min=30")
 
@@ -649,7 +676,7 @@ bf_expect(geodensity:::geodesic_kde_rust(g_d[1], g_d[2], -90 - 1e-9, 65, 700),
 g_s <- 699.3 + (700 - 699.3) / 2
 g_ba <- bf_tangent_bearing(65, 3 * g_s)
 g_da <- bf_destination(-90, 65, 0.9999 * 3 * g_s, g_ba)
-bf_expect(geodensity:::geodesic_kde_adaptive_rust(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3),
+bf_expect(geodensity:::geodesic_kde_adaptive_rust(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3, "balloon", "ratio"),
           bf_adaptive_norm(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3)$density,
           "adaptive cell-edge tangent 0.9999x pilot=700 lat=65")
 
@@ -799,7 +826,7 @@ bf_expect(
 )
 bf_expect(
   geodensity:::geodesic_kde_adaptive_rust(
-    t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw, 424.7
+    t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw, 424.7, "balloon", "ratio"
   ),
   bf_adaptive_norm(t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw, 424.7)$density,
   "Test 35a adaptive KDE with r >= pi/2"
@@ -818,7 +845,7 @@ bf_expect(
 )
 bf_expect(
   geodensity:::geodesic_kde_adaptive_rust(
-    t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw, 10
+    t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw, 10, "balloon", "ratio"
   ),
   bf_adaptive_norm(t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw, 10)$density,
   "Test 35b adaptive KDE with 0..360 grid longitudes"
@@ -834,6 +861,70 @@ bf_expect(
   bf_fixed_norm(t35c_x, t35c_y, t35c_gx, t35c_gy, 50),
   "Test 35c fixed KDE on global template with polar rows"
 )
+
+# =============================================================================
+# Test 36-series: adaptive method and scaling options (task 2.3.1)
+# =============================================================================
+
+# Test 36a: linear-sqrt reaches min bandwidth; ratio reaches its half-range bound.
+t36a_pts <- terra::vect(data.frame(lon = t1_x, lat = t1_y),
+                        geom = c("lon", "lat"), crs = "OGC:CRS84")
+t36a_linear <- terra::values(kde_adaptive(
+  t36a_pts, t1_tpl, 150, 15, method = "balloon", scaling = "linear_sqrt"
+))[, 1]
+t36a_ref <- bf_adaptive_full(
+  t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150, 15, "balloon", "linear_sqrt"
+)
+bf_expect(t36a_linear, t36a_ref$density, "Test 36a balloon linear_sqrt reference")
+expect_true(min(t36a_ref$scale) == 15, info = "Test 36a linear_sqrt reaches minimum bandwidth")
+t36a_ratio <- bf_adaptive_full(
+  t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150, 15, "balloon", "ratio"
+)
+expect_equal(min(t36a_ratio$scale), 82.5, tolerance = 1e-12,
+             info = "Test 36a ratio minimum is midpoint")
+
+# Test 36b: sample-point estimates match an independent reference for both scalings.
+for (t36b_scaling in c("ratio", "linear_sqrt")) {
+  t36b_out <- terra::values(kde_adaptive(
+    t36a_pts, t1_tpl, 150, 15, method = "sample_point", scaling = t36b_scaling
+  ))[, 1]
+  t36b_ref <- bf_adaptive_full(
+    t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150, 15, "sample_point", t36b_scaling
+  )
+  bf_expect(t36b_out, t36b_ref$density,
+            paste("Test 36b sample_point", t36b_scaling, "reference"))
+}
+
+# Test 36c: sample-point kernels integrate to unit mass; balloon estimates need not.
+set.seed(3603)
+t36c_x <- runif(20, -0.05, 0.05)
+t36c_y <- runif(20, -0.05, 0.05)
+t36c_pts <- terra::vect(data.frame(lon = t36c_x, lat = t36c_y),
+                        geom = c("lon", "lat"), crs = "OGC:CRS84")
+t36c_tpl <- terra::rast(extent = c(-1.5, 1.5, -1.5, 1.5), resolution = 0.05,
+                        crs = "OGC:CRS84")
+t36c_grid <- terra::xyFromCell(t36c_tpl, 1:terra::ncell(t36c_tpl))
+t36c_area <- (0.05 * 111.195)^2 * cos(t36c_grid[, 2] * pi / 180)
+t36c_integral <- function(method) {
+  values <- terra::values(kde_adaptive(
+    t36c_pts, t36c_tpl, 50, 15, method = method
+  ))[, 1]
+  sum(values * t36c_area)
+}
+t36c_sample_mass <- t36c_integral("sample_point")
+t36c_balloon_mass <- t36c_integral("balloon")
+expect_true(abs(t36c_sample_mass - 1) <= 0.02,
+            info = sprintf("Test 36c sample-point mass %.5f is within 2%% of 1",
+                           t36c_sample_mass))
+expect_true(abs(t36c_balloon_mass - 1) > 0.10,
+            info = sprintf("Test 36c balloon mass %.5f differs from 1 by >10%%",
+                           t36c_balloon_mass))
+
+# Test 36d: public API rejects invalid option values.
+expect_error(kde_adaptive(t36a_pts, t1_tpl, 150, 15, method = "invalid"),
+             "'arg' should be one of", info = "Test 36d invalid method errors")
+expect_error(kde_adaptive(t36a_pts, t1_tpl, 150, 15, scaling = "invalid"),
+             "'arg' should be one of", info = "Test 36d invalid scaling errors")
 
 # =============================================================================
 # Summary

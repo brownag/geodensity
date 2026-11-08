@@ -35,9 +35,11 @@ geodesic_kde_rust <- function(x_coords, y_coords, grid_x, grid_y, bandwidth_km) 
 #' @param grid_y Vector of Y coordinates for the output grid cells
 #' @param pilot_bandwidth_km Pilot bandwidth in kilometers for the first pass
 #' @param min_bandwidth_km Minimum bandwidth in kilometers (lower bound for adaptive scaling)
+#' @param method Adaptive estimator: "balloon" or "sample_point"
+#' @param scaling Bandwidth scaling formula: "ratio" or "linear_sqrt"
 #' @return A vector of adaptive density values corresponding to the grid points
 #' @noRd
-geodesic_kde_adaptive_rust <- function(x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km) .Call(wrap__geodesic_kde_adaptive_rust, x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km)
+geodesic_kde_adaptive_rust <- function(x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km, method, scaling) .Call(wrap__geodesic_kde_adaptive_rust, x_coords, y_coords, grid_x, grid_y, pilot_bandwidth_km, min_bandwidth_km, method, scaling)
 
 #' Evaluate Leave-One-Out Cross-Validation Log-Likelihood for Multiple Bandwidths
 #'

@@ -165,9 +165,32 @@ fn geodesic_kde_rust(
     densities.iter().map(|&d| d / norm).collect()
 }
 
-/// Adaptive geodesic kernel density estimate. Per-cell bandwidth is
-/// bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max)), where d_i is the pilot density
-/// at cell i and d_max is the maximum pilot density over the grid.
+fn compute_adaptive_scales(
+    pilot_density: &[f64],
+    pilot_bw: f64,
+    min_bw: f64,
+    scaling: &str,
+) -> Vec<f64> {
+    let reference_density = pilot_density.iter().copied().fold(0.0, f64::max);
+    pilot_density
+        .iter()
+        .map(|&d| {
+            let density_ratio = if reference_density > 0.0 {
+                d / reference_density
+            } else {
+                0.0
+            };
+            let scale_factor = match scaling {
+                "linear_sqrt" => 1.0 - density_ratio.sqrt(),
+                _ => 1.0 / (1.0 + density_ratio.sqrt()),
+            };
+            min_bw + (pilot_bw - min_bw) * scale_factor
+        })
+        .collect()
+}
+
+/// Adaptive geodesic KDE: method is "balloon" or "sample_point"; scaling is
+/// "ratio" or "linear_sqrt".
 #[extendr]
 fn geodesic_kde_adaptive_rust(
     x_coords: Vec<f64>,
@@ -176,65 +199,63 @@ fn geodesic_kde_adaptive_rust(
     grid_y: Vec<f64>,
     pilot_bandwidth_km: f64,
     min_bandwidth_km: f64,
+    method: &str,
+    scaling: &str,
 ) -> Vec<f64> {
-    // Pass 1: Compute pilot density with fixed bandwidth
+    let sample_point = method == "sample_point";
+    let (pilot_x, pilot_y) = if sample_point {
+        (x_coords.clone(), y_coords.clone())
+    } else {
+        (grid_x.clone(), grid_y.clone())
+    };
     let pilot_density = geodesic_kde_rust(
         x_coords.clone(),
         y_coords.clone(),
-        grid_x.clone(),
-        grid_y.clone(),
+        pilot_x,
+        pilot_y,
         pilot_bandwidth_km,
     );
-
-    // Pass 2: Compute scaling factors per grid cell
-    // Adaptive scaling: bandwidth_i = min + (pilot - min) / (1 + (density_i / ref_density)^lambda)
-    // where lambda = 0.5 (sqrt) controls adaptation strength and ref_density is the pilot density max
-    // This gives smooth interpolation between min_bw (at high density) and pilot_bw (at zero density)
-
-    let reference_density = pilot_density.iter().copied().fold(0.0, f64::max);
-    let lambda = 0.5;  // Control adaptation strength
-
-    let scales: Vec<f64> = pilot_density
-        .iter()
-        .map(|&d| {
-            // Smooth scaling: high density -> lower bandwidth, low density -> higher bandwidth
-            let density_ratio = if reference_density > 0.0 { d / reference_density } else { 0.0 };
-            let scale_factor = 1.0 / (1.0 + density_ratio.powf(lambda));
-            let bandwidth_range = pilot_bandwidth_km - min_bandwidth_km;
-            min_bandwidth_km + bandwidth_range * scale_factor
-        })
-        .collect();
-
-    // Pass 3: Compute final density using per-cell scaled bandwidths
-    // This is more complex than Pass 1 because we need different bandwidths per grid cell
+    let scales = compute_adaptive_scales(
+        &pilot_density,
+        pilot_bandwidth_km,
+        min_bandwidth_km,
+        scaling,
+    );
     let data_points: Vec<_> = x_coords
         .iter()
         .zip(y_coords.iter())
         .map(|(&x, &y)| geo::Point::new(x, y))
         .collect();
 
-    // Index and search extent use the pilot bandwidth. Every per-cell cutoff 3*scale is
-    // at most 3*pilot, because scale <= pilot_bandwidth_km when min < pilot.
     let cutoff_km = 3.0 * pilot_bandwidth_km;
     let index_cell_size = index_cell_size(&grid_y, cutoff_km);
     let grid_index = build_spatial_index(&data_points, index_cell_size);
+    let point_norms: Vec<f64> = scales
+        .iter()
+        .map(|&bw| 1.0 / (2.0 * std::f64::consts::PI * bw * bw * x_coords.len() as f64))
+        .collect();
 
 
-    // Parallel computation using scaled bandwidths
     let densities: Vec<f64> = grid_x
         .par_iter()
         .zip(grid_y.par_iter())
-        .zip(scales.par_iter())
-        .map(|((&gx, &gy), &bandwidth_km)| {
+        .enumerate()
+        .map(|(cell_idx, (&gx, &gy))| {
             let grid_point = geo::Point::new(gx, gy);
             let mut sum = 0.0;
             let mut visit = |idx: usize| {
                 let point = &data_points[idx];
                 let dist_meters = point.haversine_distance(&grid_point);
                 let dist_km = dist_meters / 1000.0;
-                if dist_km < (bandwidth_km * 3.0) {
-                    let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
-                    sum += exponent.exp();
+                let scale_idx = if sample_point { idx } else { cell_idx };
+                let bandwidth_km = scales[scale_idx];
+                if dist_km < 3.0 * bandwidth_km {
+                    let kernel = (-0.5 * (dist_km / bandwidth_km).powi(2)).exp();
+                    if sample_point {
+                        sum += kernel * point_norms[idx];
+                    } else {
+                        sum += kernel;
+                    }
                 }
             };
 
@@ -247,17 +268,15 @@ fn geodesic_kde_adaptive_rust(
                 index_cell_size,
                 &mut visit,
             );
-            sum
+            if sample_point {
+                sum
+            } else {
+                sum / (2.0 * std::f64::consts::PI * scales[cell_idx].powi(2)
+                    * x_coords.len() as f64)
+            }
         })
         .collect();
-
-    // Normalize to probability density: divide by 2*pi*scale_i^2*n per cell (after accumulation)
-    let n = x_coords.len() as f64;
     densities
-        .iter()
-        .zip(scales.iter())
-        .map(|(&d, &s)| d / (2.0 * std::f64::consts::PI * s * s * n))
-        .collect()
 }
 
 /// Leave-one-out CV log-likelihood for each bandwidth (serial; O(n * B) memory).
