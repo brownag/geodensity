@@ -33,10 +33,11 @@ log-likelihood scores. Default: TRUE.}
 A list with class \code{bandwidth_cv} containing:
 \itemize{
 \item \code{bandwidth_opt}: Optimal bandwidth in kilometers (numeric scalar)
-\item \code{log_likelihood}: Log-likelihood scores for each bandwidth candidate. These use
-the intensity normalization \code{1 / (2 * pi * bandwidth^2)} (no division by n), so
-they are on an absolute scale that differs from \verb{kde_*} output by a constant
-\code{log(n)}. Compare them across bandwidths only.
+\item \code{log_likelihood}: Log-likelihood scores for each bandwidth candidate. LOOCV uses
+the intensity factor \code{1 / (2 * pi * bandwidth^2)}, omitting \code{1 / n}; this alone
+would shift identical unfloored log-densities by \code{log(n)}. LOOCV also excludes
+each held-out point, applies no \code{3 * bandwidth} cutoff, and floors densities at
+\code{1e-10}, so scores do not differ from \verb{kde_*} output by an unconditional constant.
 \item \code{bandwidths}: Bandwidth values evaluated
 \item \code{n_points}: Number of points evaluated
 }
@@ -73,18 +74,22 @@ candidates (n_bandwidths = 5-8) for faster results.
 Each leave-one-out density is floored at 1e-10 before taking the log, so a point with
 zero density under a bandwidth does not produce \code{-Inf}.
 
-The backend precomputes an n-by-n matrix of pairwise distances, so memory use grows as
-O(n^2). The loops also cost O(n^2) per bandwidth candidate.
+The backend accumulates densities across point pairs directly, using
+O(n * n_bandwidths) memory. Time complexity remains O(n^2 * n_bandwidths).
 
-The log-likelihood uses the intensity normalization \code{1 / (2 * pi * bandwidth^2)}, with
-no division by n. Its values therefore differ from \verb{kde_*} output by a constant \code{log(n)}.
-Only the ranking across bandwidths is meaningful for choosing a bandwidth.
+LOOCV uses the intensity factor \code{1 / (2 * pi * bandwidth^2)}, omitting \code{1 / n},
+which would shift identical unfloored log-densities by \code{log(n)}. However, it also
+excludes each held-out point, applies no \code{3 * bandwidth} cutoff, and floors density
+at \code{1e-10} before taking the log. Thus its scores do not differ from \verb{kde_*} output
+by an unconditional constant; compare scores across bandwidths for selection.
 }
 
 \subsection{Relationship to Silverman's Rule}{
 
-Silverman's Rule provides a quick estimate: h = 1.06 * sigma * n^(-1/5)
-where sigma is the standard deviation of coordinates and n is point count.
+The two-dimensional normal reference rule provides a quick estimate:
+\code{h = sigma_km * n^(-1/6)}, where \code{sigma_km} is the root-mean-square standard
+deviation of point coordinates expressed in kilometres (not degrees), and \code{n} is
+the point count. All bandwidths in \code{bandwidth_optimize()} are in kilometres.
 This is a reasonable starting point but may be over-smoothed for clustered data.
 Cross-validation often selects smaller bandwidths than Silverman's rule.
 }

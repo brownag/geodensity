@@ -4,7 +4,14 @@
 \alias{kde_adaptive}
 \title{Adaptive Geodesic Kernel Density Estimation}
 \usage{
-kde_adaptive(x, r, pilot_bandwidth, min_bandwidth = NULL)
+kde_adaptive(
+  x,
+  r,
+  pilot_bandwidth,
+  min_bandwidth = NULL,
+  method = c("balloon", "sample_point"),
+  scaling = c("ratio", "linear_sqrt")
+)
 }
 \arguments{
 \item{x}{A \code{SpatVector} or \code{sf} object containing points in geographic coordinates
@@ -23,15 +30,27 @@ adaptation.}
 \item{min_bandwidth}{Minimum bandwidth in kilometers (numeric scalar). Limits how small
 the adaptive bandwidth can become in high-density regions. Default is 10\% of pilot
 bandwidth. Must be positive and less than \code{pilot_bandwidth}.}
+
+\item{method}{Adaptive estimator: \code{"balloon"} (default) varies bandwidth per template
+grid cell using pilot density on the template grid; \code{"sample_point"} varies bandwidth
+per input data point using pilot density at the input points.}
+
+\item{scaling}{Bandwidth scaling formula: \code{"ratio"} (default) uses
+\code{bw = min + (pilot - min) / (1 + sqrt(d / d_max))}, ranging from
+\code{(min_bandwidth + pilot_bandwidth) / 2} at \code{d = d_max} to \code{pilot_bandwidth} at
+\code{d = 0} when \code{d_max > 0}. \code{"linear_sqrt"} uses
+\code{bw = min + (pilot - min) * (1 - sqrt(d / d_max))}, spanning the full
+\verb{[min_bandwidth, pilot_bandwidth]} range when \code{d_max > 0}.}
 }
 \value{
-A \code{SpatRaster} containing the adaptive kernel density estimates at each grid cell.
-Values represent the density of input points computed with locally-scaled kernels.
-Values are probability density per square kilometre: the kernel sum divided by
-\code{2 * pi * bw_i^2 * n}, where \code{bw_i} is the per-cell bandwidth and \code{n} is the number
-of input points. This is a planar approximation. The values integrate to approximately
-1 over the plane, not exactly, because of the spherical metric and the 3 * bw_i
-kernel truncation.
+A \code{SpatRaster} containing adaptive kernel density estimates at each grid cell.
+Values are probability density per square kilometre. With \code{method = "balloon"},
+each grid cell is divided by \code{2 * pi * bw_i^2 * n}, where \code{bw_i} varies by cell
+and \code{n} is the number of input points. This locally-normalized estimate does not
+guarantee unit total mass over the surface. With \code{method = "sample_point"}, each
+input point's kernel is normalized by \code{2 * pi * bw_j^2 * n}. The resulting mixture
+integrates to approximately 1 over the plane, subject to spherical geometry and
+truncation at \code{3 * bw_j}.
 }
 \description{
 Computes adaptive kernel density estimates where the bandwidth varies inversely with
@@ -40,15 +59,18 @@ while sparse regions use larger bandwidths for smoother estimates. This is usefu
 when point density varies dramatically across the study area.
 }
 \details{
-The algorithm uses a two-pass approach:
-\enumerate{
-\item Compute pilot density with fixed \code{pilot_bandwidth}
-\item Scale bandwidth per grid cell as
-\code{bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))}, where \code{d_i} is the pilot
-density at the cell and \code{d_max} is the maximum pilot density over the template
-grid. The result lies in \verb{[min_bandwidth, pilot_bandwidth]}.
-\item Compute final density using the scaled per-cell bandwidths
-}
+The algorithm uses a two-pass approach. The \code{method} selects where pilot density
+is evaluated and bandwidths are assigned: \code{"balloon"} uses pilot density on the
+template grid and assigns a bandwidth to each grid cell; \code{"sample_point"} evaluates
+pilot density at input points and assigns a bandwidth to each input point.
+The \code{scaling} option controls the bandwidth formula. \code{"ratio"} uses
+\code{bw = min + (pilot - min) / (1 + sqrt(d / d_max))}; \code{"linear_sqrt"} uses
+\code{bw = min + (pilot - min) * (1 - sqrt(d / d_max))}, where \code{d} is pilot density
+and \code{d_max} is its maximum over the method-specific evaluation locations.
+For positive \code{d_max}, ratio scaling ranges from
+\code{(min_bandwidth + pilot_bandwidth) / 2} to \code{pilot_bandwidth}; linear-sqrt scaling
+spans \verb{[min_bandwidth, pilot_bandwidth]}.
+The final density is computed using the method-specific bandwidths.
 \subsection{When to Use Adaptive KDE}{
 
 Adaptive KDE is particularly useful for datasets with highly variable point density:
@@ -70,9 +92,10 @@ Adaptive KDE is particularly useful for datasets with highly variable point dens
 
 \subsection{Grid Dependence}{
 
-The per-cell bandwidth depends on the template raster. The pilot density is evaluated
-on the template cells and \code{d_max} is the template maximum, so the same points on a
-different template can yield different bandwidths.
+With \code{method = "balloon"}, pilot density is evaluated on template cells and \code{d_max}
+is the template maximum, so a different template can yield different bandwidths.
+With \code{method = "sample_point"}, pilot density is evaluated at input points and
+\code{d_max} is the maximum over those points, independent of template extent.
 }
 }
 \examples{
