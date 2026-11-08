@@ -150,13 +150,18 @@ kde_geodesic <- function(x, r, bandwidth) {
 #' while sparse regions use larger bandwidths for smoother estimates. This is useful
 #' when point density varies dramatically across the study area.
 #'
-#' The algorithm uses a two-pass approach:
-#' 1. Compute pilot density with fixed `pilot_bandwidth`
-#' 2. Scale bandwidth per grid cell as
-#'    `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is the pilot
-#'    density at the cell and `d_max` is the maximum pilot density over the template
-#'    grid. The result lies in `[min_bandwidth, pilot_bandwidth]`.
-#' 3. Compute final density using the scaled per-cell bandwidths
+#' The algorithm uses a two-pass approach. The `method` selects where pilot density
+#' is evaluated and bandwidths are assigned: `"balloon"` uses pilot density on the
+#' template grid and assigns a bandwidth to each grid cell; `"sample_point"` evaluates
+#' pilot density at input points and assigns a bandwidth to each input point.
+#' The `scaling` option controls the bandwidth formula. `"ratio"` uses
+#' `bw = min + (pilot - min) / (1 + sqrt(d / d_max))`; `"linear_sqrt"` uses
+#' `bw = min + (pilot - min) * (1 - sqrt(d / d_max))`, where `d` is pilot density
+#' and `d_max` is its maximum over the method-specific evaluation locations.
+#' For positive `d_max`, ratio scaling ranges from
+#' `(min_bandwidth + pilot_bandwidth) / 2` to `pilot_bandwidth`; linear-sqrt scaling
+#' spans `[min_bandwidth, pilot_bandwidth]`.
+#' The final density is computed using the method-specific bandwidths.
 #'
 #' @param x A `SpatVector` or `sf` object containing points in geographic coordinates
 #'   (latitude/longitude). Data must be in a geographic CRS (lon/lat). If you have
@@ -171,14 +176,24 @@ kde_geodesic <- function(x, r, bandwidth) {
 #' @param min_bandwidth Minimum bandwidth in kilometers (numeric scalar). Limits how small
 #'   the adaptive bandwidth can become in high-density regions. Default is 10% of pilot
 #'   bandwidth. Must be positive and less than `pilot_bandwidth`.
+#' @param method Adaptive estimator: `"balloon"` (default) varies bandwidth per template
+#'   grid cell using pilot density on the template grid; `"sample_point"` varies bandwidth
+#'   per input data point using pilot density at the input points.
+#' @param scaling Bandwidth scaling formula: `"ratio"` (default) uses
+#'   `bw = min + (pilot - min) / (1 + sqrt(d / d_max))`, ranging from
+#'   `(min_bandwidth + pilot_bandwidth) / 2` at `d = d_max` to `pilot_bandwidth` at
+#'   `d = 0` when `d_max > 0`. `"linear_sqrt"` uses
+#'   `bw = min + (pilot - min) * (1 - sqrt(d / d_max))`, spanning the full
+#'   `[min_bandwidth, pilot_bandwidth]` range when `d_max > 0`.
 #'
-#' @return A `SpatRaster` containing the adaptive kernel density estimates at each grid cell.
-#'   Values represent the density of input points computed with locally-scaled kernels.
-#'   Values are probability density per square kilometre: the kernel sum divided by
-#'   `2 * pi * bw_i^2 * n`, where `bw_i` is the per-cell bandwidth and `n` is the number
-#'   of input points. This is a planar approximation. The values integrate to approximately
-#'   1 over the plane, not exactly, because of the spherical metric and the 3 * bw_i
-#'   kernel truncation.
+#' @return A `SpatRaster` containing adaptive kernel density estimates at each grid cell.
+#'   Values are probability density per square kilometre. With `method = "balloon"`,
+#'   each grid cell is divided by `2 * pi * bw_i^2 * n`, where `bw_i` varies by cell
+#'   and `n` is the number of input points. This locally-normalized estimate does not
+#'   guarantee unit total mass over the surface. With `method = "sample_point"`, each
+#'   input point's kernel is normalized by `2 * pi * bw_j^2 * n`. The resulting mixture
+#'   integrates to approximately 1 over the plane, subject to spherical geometry and
+#'   truncation at `3 * bw_j`.
 #'
 #' @import terra
 #'
@@ -199,9 +214,10 @@ kde_geodesic <- function(x, r, bandwidth) {
 #'
 #' ## Grid Dependence
 #'
-#' The per-cell bandwidth depends on the template raster. The pilot density is evaluated
-#' on the template cells and `d_max` is the template maximum, so the same points on a
-#' different template can yield different bandwidths.
+#' With `method = "balloon"`, pilot density is evaluated on template cells and `d_max`
+#' is the template maximum, so a different template can yield different bandwidths.
+#' With `method = "sample_point"`, pilot density is evaluated at input points and
+#' `d_max` is the maximum over those points, independent of template extent.
 #'
 #' @examples
 #' \donttest{
@@ -370,10 +386,11 @@ kde_adaptive <- function(
 #'
 #' @return A list with class `bandwidth_cv` containing:
 #'   - `bandwidth_opt`: Optimal bandwidth in kilometers (numeric scalar)
-#'   - `log_likelihood`: Log-likelihood scores for each bandwidth candidate. These use
-#'     the intensity normalization `1 / (2 * pi * bandwidth^2)` (no division by n), so
-#'     they are on an absolute scale that differs from `kde_*` output by a constant
-#'     `log(n)`. Compare them across bandwidths only.
+#'   - `log_likelihood`: Log-likelihood scores for each bandwidth candidate. LOOCV uses
+#'     the intensity factor `1 / (2 * pi * bandwidth^2)`, omitting `1 / n`; this alone
+#'     would shift identical unfloored log-densities by `log(n)`. LOOCV also excludes
+#'     each held-out point, applies no `3 * bandwidth` cutoff, and floors densities at
+#'     `1e-10`, so scores do not differ from `kde_*` output by an unconditional constant.
 #'   - `bandwidths`: Bandwidth values evaluated
 #'   - `n_points`: Number of points evaluated
 #'
@@ -395,17 +412,21 @@ kde_adaptive <- function(
 #' Each leave-one-out density is floored at 1e-10 before taking the log, so a point with
 #' zero density under a bandwidth does not produce `-Inf`.
 #'
-#' The backend precomputes an n-by-n matrix of pairwise distances, so memory use grows as
-#' O(n^2). The loops also cost O(n^2) per bandwidth candidate.
+#' The backend accumulates densities across point pairs directly, using
+#' O(n * n_bandwidths) memory. Time complexity remains O(n^2 * n_bandwidths).
 #'
-#' The log-likelihood uses the intensity normalization `1 / (2 * pi * bandwidth^2)`, with
-#' no division by n. Its values therefore differ from `kde_*` output by a constant `log(n)`.
-#' Only the ranking across bandwidths is meaningful for choosing a bandwidth.
+#' LOOCV uses the intensity factor `1 / (2 * pi * bandwidth^2)`, omitting `1 / n`,
+#' which would shift identical unfloored log-densities by `log(n)`. However, it also
+#' excludes each held-out point, applies no `3 * bandwidth` cutoff, and floors density
+#' at `1e-10` before taking the log. Thus its scores do not differ from `kde_*` output
+#' by an unconditional constant; compare scores across bandwidths for selection.
 #'
 #' ## Relationship to Silverman's Rule
 #'
-#' Silverman's Rule provides a quick estimate: h = 1.06 * sigma * n^(-1/5)
-#' where sigma is the standard deviation of coordinates and n is point count.
+#' The two-dimensional normal reference rule provides a quick estimate:
+#' `h = sigma_km * n^(-1/6)`, where `sigma_km` is the root-mean-square standard
+#' deviation of point coordinates expressed in kilometres (not degrees), and `n` is
+#' the point count. All bandwidths in `bandwidth_optimize()` are in kilometres.
 #' This is a reasonable starting point but may be over-smoothed for clustered data.
 #' Cross-validation often selects smaller bandwidths than Silverman's rule.
 #'
