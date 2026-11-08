@@ -3,10 +3,10 @@ Title: Geodesic Kernel Density Estimation for Spatial Data
 Version: 0.1.1
 Maintainer: Andrew Gen Brown <brown.andrewg@gmail.com>
 Authors@R: person(
-    given = "Andrew", 
+    given = "Andrew",
     middle = "Gene",
-    family = "Brown", 
-    email = "brown.andrewg@gmail.com", 
+    family = "Brown",
+    email = "brown.andrewg@gmail.com",
     role = c("aut", "cre"),
     comment = c(ORCID = "0000-0002-4565-533X"))
 Description: Compute kernel density estimates on geographic data using geodesic distances.
