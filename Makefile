@@ -40,10 +40,11 @@ build: vendor
 	@echo "  - Preparing R package..."
 	@Rscript -e "devtools::load_all(quiet=TRUE); cat('Build successful!\n')"
 
-# Run tests
+# Run tests (exits nonzero on any failed expectation or zero expectations)
+TEST_FILE ?= inst/tinytest/test_geodensity.R
 test:
 	@echo "Running test suite..."
-	@Rscript -e "devtools::load_all(quiet=TRUE); source('inst/tinytest/test_geodensity.R')"
+	@Rscript -e "devtools::load_all(quiet=TRUE); r <- tinytest::run_test_file('$(TEST_FILE)'); d <- as.data.frame(r); n <- nrow(d); f <- sum(!d[['result']]); cat(sprintf('%d expectations, %d failed\n', n, f)); if (n == 0L || f > 0L) quit(status = 1L)"
 
 # Install to library
 install: docs
