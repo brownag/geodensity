@@ -439,6 +439,202 @@ expect_equal(res$bandwidth_opt, 50)
 
 
 # =============================================================================
+# Test 32-series: independent brute-force KDE references (task 5.1.2)
+# No spatial index. Haversine with R = 6371.0088 km (geo's mean radius).
+# Unnormalized kernel sums; normalization is task 5.1.5.
+# =============================================================================
+bf_R_KM <- 6371.0088
+
+# Haversine distance (km) from data points (x, y) to one grid point (gx, gy)
+bf_haversine_km <- function(x, y, gx, gy) {
+  p1 <- gy * pi / 180
+  p2 <- y * pi / 180
+  a <- sin((p2 - p1) / 2)^2 + cos(p1) * cos(p2) * sin((x - gx) * pi / 360)^2
+  2 * bf_R_KM * asin(pmin(1, sqrt(a)))
+}
+
+# Destination point (lon, lat) at dist_km along bearing_deg (0 = north, 90 = east)
+bf_destination <- function(lon, lat, dist_km, bearing_deg) {
+  delta <- dist_km / bf_R_KM
+  theta <- bearing_deg * pi / 180
+  phi1 <- lat * pi / 180
+  lam1 <- lon * pi / 180
+  phi2 <- asin(sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta))
+  lam2 <- lam1 + atan2(sin(theta) * sin(delta) * cos(phi1),
+                       cos(delta) - sin(phi1) * sin(phi2))
+  c(lon = (lam2 * 180 / pi + 540) %% 360 - 180, lat = phi2 * 180 / pi)
+}
+
+# Fixed-bandwidth reference: sum of exp(-0.5 (d/bw)^2) over d < 3 bw
+bf_fixed <- function(x, y, gx, gy, bw) {
+  vapply(seq_along(gx), function(i) {
+    d <- bf_haversine_km(x, y, gx[i], gy[i])
+    keep <- d < 3 * bw
+    sum(exp(-0.5 * (d[keep] / bw)^2))
+  }, numeric(1))
+}
+
+# Adaptive reference: brute-force pilot, per-cell scale, brute-force sum with cutoff 3*scale
+bf_adaptive <- function(x, y, gx, gy, pilot, min_bw) {
+  p <- bf_fixed(x, y, gx, gy, pilot)
+  dmax <- max(p)
+  ratio <- if (dmax > 0) p / dmax else rep(0, length(p))
+  scale <- min_bw + (pilot - min_bw) / (1 + sqrt(ratio))
+  vapply(seq_along(gx), function(i) {
+    d <- bf_haversine_km(x, y, gx[i], gy[i])
+    keep <- d < 3 * scale[i]
+    sum(exp(-0.5 * (d[keep] / scale[i])^2))
+  }, numeric(1))
+}
+
+# Relative comparison at 1e-10 per element. Where the reference is 0, the result must be 0.
+bf_expect <- function(res, ref, info) {
+  expect_equal(length(res), length(ref), info = paste(info, "length"))
+  rel <- ifelse(ref == 0, abs(res), abs(res - ref) / abs(ref))
+  expect_true(all(rel <= 1e-10),
+              info = sprintf("%s: max relative diff %.3g (1e-10 allowed)", info, max(rel)))
+}
+
+# Case A: heterogeneous latitudes, roughly -60 to 75
+set.seed(5201)
+ha_x <- runif(200, -120, -40)
+ha_y <- runif(200, -60, 75)
+ha_gx <- rep(seq(-120, -40, length.out = 13), 9)
+ha_gy <- rep(seq(-60, 75, length.out = 9), each = 13)
+for (bw in c(40, 250)) {
+  bf_expect(geodesic_kde_rust(ha_x, ha_y, ha_gx, ha_gy, bw),
+            bf_fixed(ha_x, ha_y, ha_gx, ha_gy, bw),
+            sprintf("fixed heterogeneous bw=%g", bw))
+}
+bf_expect(geodesic_kde_adaptive_rust(ha_x, ha_y, ha_gx, ha_gy, 150, 15),
+          bf_adaptive(ha_x, ha_y, ha_gx, ha_gy, 150, 15),
+          "adaptive heterogeneous pilot=150 min=15")
+
+# Case B: dateline-crossing set, data and grid on both sides of +/-180 at lat 68-76
+set.seed(5202)
+hb_x <- c(runif(60, 170, 180), runif(60, -180, -170), 180, -180)
+hb_y <- runif(122, 68, 76)
+hb_gx <- c(runif(20, 170, 180), runif(20, -180, -170), 179.5, -179.5, 180, -180)
+hb_gy <- c(runif(40, 68, 76), rep(72, 4))
+for (bw in c(60, 120)) {
+  bf_expect(geodesic_kde_rust(hb_x, hb_y, hb_gx, hb_gy, bw),
+            bf_fixed(hb_x, hb_y, hb_gx, hb_gy, bw),
+            sprintf("fixed dateline bw=%g", bw))
+}
+bf_expect(geodesic_kde_adaptive_rust(hb_x, hb_y, hb_gx, hb_gy, 120, 12),
+          bf_adaptive(hb_x, hb_y, hb_gx, hb_gy, 120, 12),
+          "adaptive dateline pilot=120 min=12")
+
+# Case C: contributors at 0.9x, 0.999x, 1.1x the cutoff, due north (0) and due east (90),
+# at lat 40 and lat 65. Cutoff is 3*bw (fixed, bw = 50) or 3*scale (adaptive, single cell).
+for (cx in list(c(-100, 40), c(-60, 65))) {
+  pts <- NULL
+  for (f in c(0.9, 0.999, 1.1)) for (b in c(0, 90)) {
+    dst <- bf_destination(cx[1], cx[2], f * 150, b)
+    expect_equal(bf_haversine_km(dst[1], dst[2], cx[1], cx[2]), f * 150, tolerance = 1e-12,
+                 info = sprintf("placement f=%g bearing=%g lat=%g", f, b, cx[2]))
+    pts <- rbind(pts, dst)
+  }
+  bf_expect(geodesic_kde_rust(pts[, 1], pts[, 2], cx[1], cx[2], 50),
+            bf_fixed(pts[, 1], pts[, 2], cx[1], cx[2], 50),
+            sprintf("fixed cutoff-band lat=%g bw=50", cx[2]))
+  # Adaptive, one grid cell: ratio = 1, so scale = min + (pilot - min)/2 = 37.5 km (pilot 50, min 25)
+  pts_a <- NULL
+  for (f in c(0.9, 0.999, 1.1)) for (b in c(0, 90)) {
+    pts_a <- rbind(pts_a, bf_destination(cx[1], cx[2], f * 3 * 37.5, b))
+  }
+  bf_expect(geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25),
+            bf_adaptive(pts_a[, 1], pts_a[, 2], cx[1], cx[2], 50, 25),
+            sprintf("adaptive cutoff-band lat=%g", cx[2]))
+}
+
+# Case D: grid cells on and near index-cell boundaries (offsets -1e-9, 0, +1e-9 deg).
+# Boundary spacing: 1.5 * (3 bw) in degrees, lat-based for latitude and cos(75) for longitude.
+bf_cell_lat <- function(bw) 1.5 * 3 * bw / (bf_R_KM * pi / 180)
+bf_cell_lon <- function(bw) 1.5 * 3 * bw / (bf_R_KM * pi / 180 * cos(75 * pi / 180))
+set.seed(5204)
+hd_x <- runif(200, -120, -40)
+hd_y <- runif(200, -60, 75)
+for (bw in c(40, 90)) {
+  off <- c(-1e-9, 0, 1e-9)
+  cl <- bf_cell_lon(bw); ct <- bf_cell_lat(bw)
+  lon_b <- as.vector(outer(seq(floor(-120 / cl), ceiling(-40 / cl)) * cl, off, "+"))
+  lat_b <- as.vector(outer(seq(floor(-60 / ct), ceiling(75 / ct)) * ct, off, "+"))
+  g <- expand.grid(gx = lon_b, gy = lat_b)
+  bf_expect(geodesic_kde_rust(hd_x, hd_y, g$gx, g$gy, bw),
+            bf_fixed(hd_x, hd_y, g$gx, g$gy, bw),
+            sprintf("fixed index-boundary bw=%g", bw))
+  bf_expect(geodesic_kde_adaptive_rust(hd_x, hd_y, g$gx, g$gy, 150, 15),
+            bf_adaptive(hd_x, hd_y, g$gx, g$gy, 150, 15),
+            "adaptive index-boundary pilot=150 min=15")
+}
+
+# Bearing that maximises the longitude offset of a point at dist_km from (lat, 0).
+# The longitude half-width is attained at this tangent point, which is not due east
+# (a great circle heading east from lat 65 bends south).
+bf_tangent_bearing <- function(lat, dist_km) {
+  optimize(function(b) bf_destination(0, lat, dist_km, b)[1], c(0, 90),
+           maximum = TRUE, tol = 1e-12)$maximum
+}
+
+# Case E: contributors just inside the cutoff at the tangent (max-longitude) bearing,
+# 0.9996x and 0.9999x the cutoff, at lat 40 and lat 65. Also due north 0.9996x at lat 65.
+for (lat0 in c(40, 65)) {
+  b_t <- bf_tangent_bearing(lat0, 150)
+  pts_e <- NULL
+  for (f in c(0.9996, 0.9999)) {
+    dst <- bf_destination(-100, lat0, f * 150, b_t)
+    expect_equal(bf_haversine_km(dst[1], dst[2], -100, lat0), f * 150, tolerance = 1e-12,
+                 info = sprintf("tangent placement f=%g lat=%g", f, lat0))
+    pts_e <- rbind(pts_e, dst)
+  }
+  bf_expect(geodesic_kde_rust(pts_e[, 1], pts_e[, 2], -100, lat0, 50),
+            bf_fixed(pts_e[, 1], pts_e[, 2], -100, lat0, 50),
+            sprintf("fixed tangent-east lat=%g bw=50", lat0))
+  # Adaptive, single grid cell: scale = 37.5 km (pilot 50, min 25), cutoff 112.5 km
+  b_ta <- bf_tangent_bearing(lat0, 3 * 37.5)
+  pts_a <- NULL
+  for (f in c(0.9996, 0.9999)) pts_a <- rbind(pts_a, bf_destination(-100, lat0, f * 3 * 37.5, b_ta))
+  bf_expect(geodesic_kde_adaptive_rust(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25),
+            bf_adaptive(pts_a[, 1], pts_a[, 2], -100, lat0, 50, 25),
+            sprintf("adaptive tangent-east lat=%g", lat0))
+}
+dst_n <- bf_destination(-100, 65, 0.9996 * 150, 0)
+bf_expect(geodesic_kde_rust(dst_n[1], dst_n[2], -100, 65, 50),
+          bf_fixed(dst_n[1], dst_n[2], -100, 65, 50),
+          "fixed north 0.9996 lat=65 bw=50")
+
+# Case F: circle enclosing the pole (grid at lat 89.5, data across the dateline).
+# All longitudes are inside the cutoff, so the search must not be limited to a short lon window.
+hf_x <- c(-80, 80, 179.5, -179.5, 10)
+hf_y <- c(89.5, 89.5, 89.7, 89.7, 89.6)
+hf_gx <- c(179, -179, 0)
+hf_gy <- c(89.5, 89.5, 89.5)
+bf_expect(geodesic_kde_rust(hf_x, hf_y, hf_gx, hf_gy, 300),
+          bf_fixed(hf_x, hf_y, hf_gx, hf_gy, 300),
+          "fixed pole-enclosing bw=300")
+bf_expect(geodesic_kde_adaptive_rust(hf_x, hf_y, hf_gx, hf_gy, 300, 30),
+          bf_adaptive(hf_x, hf_y, hf_gx, hf_gy, 300, 30),
+          "adaptive pole-enclosing pilot=300 min=30")
+
+# Case G: index-cell edge with a capped cell. bw = 700 km at lat 65 gives a lon half-width
+# of 44.7 deg, one cell (45-deg cap) wide. The grid point sits just west of a cell edge
+# (lon -90), so the window reaches only ~45 deg east. A contributor at the tangent bearing,
+# 0.9999x the cutoff (about 50 deg of longitude), must still be found.
+g_b <- bf_tangent_bearing(65, 3 * 700)
+g_d <- bf_destination(-90, 65, 0.9999 * 3 * 700, g_b)
+bf_expect(geodesic_kde_rust(g_d[1], g_d[2], -90 - 1e-9, 65, 700),
+          bf_fixed(g_d[1], g_d[2], -90 - 1e-9, 65, 700),
+          "fixed cell-edge tangent 0.9999x bw=700 lat=65")
+# Adaptive: min = 0.999 * pilot, so scale = min + (pilot - min)/2 (single cell, ratio 1)
+g_s <- 699.3 + (700 - 699.3) / 2
+g_ba <- bf_tangent_bearing(65, 3 * g_s)
+g_da <- bf_destination(-90, 65, 0.9999 * 3 * g_s, g_ba)
+bf_expect(geodesic_kde_adaptive_rust(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3),
+          bf_adaptive(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.3),
+          "adaptive cell-edge tangent 0.9999x pilot=700 lat=65")
+
+# =============================================================================
 # Summary
 # =============================================================================
 # All tests completed

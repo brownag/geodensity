@@ -3,6 +3,30 @@ use geo::prelude::*;
 use geo::Point;
 use rayon::prelude::*;
 
+/// Earth radius in km (geo's mean radius, 6371008.8 m)
+const EARTH_RADIUS_KM: f64 = 6371.0088;
+
+/// Search half-widths in degrees for a kernel cutoff of `cutoff_km` at latitude `lat_deg`.
+///
+/// Returns (longitude half-width, latitude half-width). The latitude half-width is
+/// cutoff / (R * pi / 180). The longitude half-width is the exact extent of a circle of
+/// angular radius r = cutoff / R around (lat, lon): asin(sin r / cos lat). If sin r / cos lat
+/// is at least 1, the circle encloses a pole and every longitude is in range (180 degrees).
+/// The cos guard only widens the bound: below the guard, the bound is the full 180 degrees.
+fn search_half_widths_deg(cutoff_km: f64, lat_deg: f64) -> (f64, f64) {
+    let km_per_lat = EARTH_RADIUS_KM * std::f64::consts::PI / 180.0;
+    let lat_hw = cutoff_km / km_per_lat;
+    let r = cutoff_km / EARTH_RADIUS_KM;
+    let cos_lat = lat_deg.to_radians().cos().abs();
+    let lon_hw = if cos_lat <= 1e-9 {
+        180.0
+    } else {
+        let s = r.sin() / cos_lat;
+        if s >= 1.0 { 180.0 } else { s.asin().to_degrees() }
+    };
+    (lon_hw, lat_hw)
+}
+
 /// Compute Geodesic Kernel Density Estimate with spatial indexing
 ///
 /// This function calculates kernel density estimates on a geographic grid using geodesic
@@ -31,45 +55,18 @@ fn geodesic_kde_rust(
         .map(|(&x, &y)| Point::new(x, y))
         .collect();
 
-    // 2. Compute dynamic spatial index grid size based on bandwidth and latitude
-    // This accounts for varying degree-to-km conversion at different latitudes
-    
-    // Calculate central latitude for Vincenty approximation of degree-to-km conversion
-    let central_lat = if !y_coords.is_empty() {
-        y_coords.iter().sum::<f64>() / y_coords.len() as f64
-    } else {
-        0.0
-    };
-    
-    let lat_rad = central_lat.to_radians();
-    let cos_lat = lat_rad.cos();
-    
-    // Linear degree-to-km conversion for spatial index grid sizing
-    // Used ONLY to determine search box size in degrees; actual distances use Haversine
-    // 
-    // Latitude degrees: constant everywhere (~111.32 km/degree)
-    // because latitude lines are parallel meridians
-    //
-    // Longitude degrees: varies with latitude (~111.32 * cos(lat) km/degree)
-    // because longitude lines (meridians) converge toward poles
-    let km_per_lon_degree = 111.32 * cos_lat;
-    let km_per_lat_degree = 111.32;
-    
-    // Search radius: 3 * bandwidth (covers 99.7% of Gaussian kernel)
-    let search_radius_km = 3.0 * bandwidth_km;
-    
-    // Convert search radius to degrees (both directions)
-    let search_radius_lon_deg = search_radius_km / km_per_lon_degree.abs().max(0.1);
-    let search_radius_lat_deg = search_radius_km / km_per_lat_degree;
-    
-    // Use larger radius so the box covers 3 * bandwidth in both lon and lat
-    // (at high latitude the lon radius is the larger one)
-    let search_radius_deg = search_radius_lon_deg.max(search_radius_lat_deg);
-    
-    // Index cell size: 1.5x the search radius (ensures 2-3 layers of adjacent cells)
-    // This prevents missing neighbors at cell boundaries
+    // 2. Spatial index sizing. Search half-widths are computed per grid point from that
+    // point's own latitude (search_half_widths_deg). The cell size covers the largest
+    // half-width over the grid, so per-point cell offsets stay bounded.
+    let cutoff_km = 3.0 * bandwidth_km;
+    let max_half_width_deg = grid_y
+        .iter()
+        .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
+        .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
+
+    // Index cell size: 1.5x the largest half-width
     // Bounded at [0.1 degrees, 45 degrees] to prevent pathological cases
-    let index_cell_size = (search_radius_deg * 1.5)
+    let index_cell_size = (max_half_width_deg * 1.5)
         .max(0.1)
         .min(45.0);
     
@@ -100,8 +97,6 @@ fn geodesic_kde_rust(
         }
     }
 
-    // 4. Calculate search radius in grid cells (rounded up for safety)
-    let search_radius_cells = (search_radius_deg / index_cell_size).ceil() as i32;
 
     // 5. Parallel iteration over the output grid (pixels)
     let densities: Vec<f64> = grid_x
@@ -110,28 +105,37 @@ fn geodesic_kde_rust(
         .map(|(&gx, &gy)| {
             let grid_point = Point::new(gx, gy);
             let mut sum = 0.0;
+            let mut visit = |idx: usize| {
+                let point = &data_points[idx];
+                let dist_meters = point.haversine_distance(&grid_point);
+                let dist_km = dist_meters / 1000.0;
+                // Gaussian kernel with 3-sigma cutoff for efficiency
+                if dist_km < (bandwidth_km * 3.0) {
+                    let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
+                    sum += exponent.exp();
+                }
+            };
 
-            // Determine which grid cells could have nearby points
-            let grid_x_key = (gx / index_cell_size).floor() as i32;
-            let grid_y_key = (gy / index_cell_size).floor() as i32;
+            let (hw_lon, hw_lat) = search_half_widths_deg(cutoff_km, gy);
+            if hw_lon >= 90.0 {
+                // Circle encloses a pole: every longitude is in range. Scan all points once.
+                // (A wide window would reach one point under both its natural and wrapped keys.)
+                for idx in 0..data_points.len() {
+                    visit(idx);
+                }
+            } else {
+                let grid_x_key = (gx / index_cell_size).floor() as i32;
+                let grid_y_key = (gy / index_cell_size).floor() as i32;
+                let ox = (hw_lon / index_cell_size).ceil() as i32;
+                let oy = (hw_lat / index_cell_size).ceil() as i32;
 
-            // Search nearby grid cells within calculated radius
-            for dx in -search_radius_cells..=search_radius_cells {
-                for dy in -search_radius_cells..=search_radius_cells {
-                    let cell_key = (grid_x_key + dx, grid_y_key + dy);
-                    
-                    if let Some(point_indices) = grid_index.get(&cell_key) {
-                        // Compute distances only to points in nearby cells
-                        for &idx in point_indices {
-                            let point = &data_points[idx];
-                            let dist_meters = point.haversine_distance(&grid_point);
-                            let dist_km = dist_meters / 1000.0;
-
-                            // Gaussian kernel with 3-sigma cutoff for efficiency
-                            if dist_km < (bandwidth_km * 3.0) {
-                                let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
-                                let k = exponent.exp();
-                                sum += k;
+                // Search nearby grid cells within the per-point search box
+                for dx in -ox..=ox {
+                    for dy in -oy..=oy {
+                        let cell_key = (grid_x_key + dx, grid_y_key + dy);
+                        if let Some(point_indices) = grid_index.get(&cell_key) {
+                            for &idx in point_indices {
+                                visit(idx);
                             }
                         }
                     }
@@ -209,20 +213,14 @@ fn geodesic_kde_adaptive_rust(
         .map(|(&x, &y)| geo::Point::new(x, y))
         .collect();
 
-    // Central latitude for index sizing (use pilot bandwidth for consistency)
-    let central_lat = y_coords.iter().sum::<f64>() / y_coords.len() as f64;
-
-    let lat_rad = central_lat.to_radians();
-    let cos_lat = lat_rad.cos();
-    let km_per_lon_degree = 111.32 * cos_lat;
-    let km_per_lat_degree = 111.32;
-
-    // Build spatial index using pilot bandwidth for consistency
-    let search_radius_km = 3.0 * pilot_bandwidth_km;
-    let search_radius_lon_deg = search_radius_km / km_per_lon_degree.abs().max(0.1);
-    let search_radius_lat_deg = search_radius_km / km_per_lat_degree;
-    let search_radius_deg = search_radius_lon_deg.max(search_radius_lat_deg);
-    let index_cell_size = (search_radius_deg * 1.5).max(0.1).min(45.0);
+    // Index and search extent use the pilot bandwidth. Every per-cell cutoff 3*scale is
+    // at most 3*pilot, because scale <= pilot_bandwidth_km when min < pilot.
+    let cutoff_km = 3.0 * pilot_bandwidth_km;
+    let max_half_width_deg = grid_y
+        .iter()
+        .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
+        .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
+    let index_cell_size = (max_half_width_deg * 1.5).max(0.1).min(45.0);
 
     let mut grid_index: std::collections::HashMap<(i32, i32), Vec<usize>> =
         std::collections::HashMap::new();
@@ -253,7 +251,6 @@ fn geodesic_kde_adaptive_rust(
         }
     }
 
-    let search_radius_cells = (search_radius_deg / index_cell_size).ceil() as i32;
 
     // Parallel computation using scaled bandwidths
     let densities: Vec<f64> = grid_x
@@ -263,24 +260,36 @@ fn geodesic_kde_adaptive_rust(
         .map(|((&gx, &gy), &bandwidth_km)| {
             let grid_point = geo::Point::new(gx, gy);
             let mut sum = 0.0;
+            let mut visit = |idx: usize| {
+                let point = &data_points[idx];
+                let dist_meters = point.haversine_distance(&grid_point);
+                let dist_km = dist_meters / 1000.0;
+                if dist_km < (bandwidth_km * 3.0) {
+                    let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
+                    sum += exponent.exp();
+                }
+            };
 
-            let grid_x_key = (gx / index_cell_size).floor() as i32;
-            let grid_y_key = (gy / index_cell_size).floor() as i32;
+            let (hw_lon, hw_lat) = search_half_widths_deg(cutoff_km, gy);
+            if hw_lon >= 90.0 {
+                // Circle encloses a pole: every longitude is in range. Scan all points once.
+                // (A wide window would reach one point under both its natural and wrapped keys.)
+                for idx in 0..data_points.len() {
+                    visit(idx);
+                }
+            } else {
+                let grid_x_key = (gx / index_cell_size).floor() as i32;
+                let grid_y_key = (gy / index_cell_size).floor() as i32;
+                let ox = (hw_lon / index_cell_size).ceil() as i32;
+                let oy = (hw_lat / index_cell_size).ceil() as i32;
 
-            for dx in -search_radius_cells..=search_radius_cells {
-                for dy in -search_radius_cells..=search_radius_cells {
-                    let cell_key = (grid_x_key + dx, grid_y_key + dy);
-
-                    if let Some(point_indices) = grid_index.get(&cell_key) {
-                        for &idx in point_indices {
-                            let point = &data_points[idx];
-                            let dist_meters = point.haversine_distance(&grid_point);
-                            let dist_km = dist_meters / 1000.0;
-
-                            if dist_km < (bandwidth_km * 3.0) {
-                                let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
-                                let k = exponent.exp();
-                                sum += k;
+                // Search nearby grid cells within the per-point search box
+                for dx in -ox..=ox {
+                    for dy in -oy..=oy {
+                        let cell_key = (grid_x_key + dx, grid_y_key + dy);
+                        if let Some(point_indices) = grid_index.get(&cell_key) {
+                            for &idx in point_indices {
+                                visit(idx);
                             }
                         }
                     }
