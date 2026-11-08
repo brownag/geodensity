@@ -635,6 +635,59 @@ bf_expect(geodesic_kde_adaptive_rust(g_da[1], g_da[2], -90 - 1e-9, 65, 700, 699.
           "adaptive cell-edge tangent 0.9999x pilot=700 lat=65")
 
 # =============================================================================
+# Test 33-series: independent adaptive checks (task 5.1.3)
+# Reuses bf_fixed / bf_adaptive / bf_expect above. Scale uses the brute-force pilot.
+# =============================================================================
+
+# Test 33a: scaling formula through its effect on output.
+# scale = min + (pilot - min) / (1 + sqrt(pilot / d_max)), d_max = template max of pilot.
+set.seed(5301)
+t1_x <- runif(150, -105, -95)
+t1_y <- runif(150, 35, 45)
+t1_pts <- terra::vect(data.frame(lon = t1_x, lat = t1_y), geom = c("lon", "lat"), crs = "OGC:CRS84")
+t1_tpl <- terra::rast(extent = c(-105, -95, 35, 45), resolution = 1, crs = "OGC:CRS84")
+t1_grid <- terra::xyFromCell(t1_tpl, 1:terra::ncell(t1_tpl))
+t1_out <- terra::values(kde_adaptive(t1_pts, t1_tpl, pilot_bandwidth = 150, min_bandwidth = 15))[, 1]
+t1_ref <- bf_adaptive(t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150, 15)
+bf_expect(t1_out, t1_ref, "adaptive scaling formula pilot=150 min=15")
+t1_pilot <- bf_fixed(t1_x, t1_y, t1_grid[, 1], t1_grid[, 2], 150)
+t1_dmax <- max(t1_pilot)
+expect_true(t1_dmax > 0, info = "scaling: d_max is positive")
+t1_scale <- 15 + (150 - 15) / (1 + sqrt(t1_pilot / t1_dmax))
+expect_true(all(t1_scale >= 15 - 1e-12 & t1_scale <= 150 + 1e-12),
+            info = "scaling: every per-cell scale lies in [min, pilot]")
+
+# Test 33b: zero pilot density everywhere (template far from all points).
+t2_tpl <- terra::rast(extent = c(-20, -10, 30, 50), resolution = 1, crs = "OGC:CRS84")
+t2_out <- terra::values(kde_adaptive(t1_pts, t2_tpl, pilot_bandwidth = 50, min_bandwidth = 5))[, 1]
+expect_true(all(t2_out == 0), info = "zero pilot density: output exactly 0")
+expect_false(any(is.nan(t2_out) | is.infinite(t2_out)),
+             info = "zero pilot density: no NaN or Inf")
+
+# Test 33c: template dependence. d_max is the template maximum, so a cell shared by two
+# templates gets a different scale when the templates have different maxima.
+# Template A contains the global pilot maximum (cell -99.5, 41.5); template B does not.
+t3_a <- terra::rast(extent = c(-110, -90, 33, 47), resolution = 1, crs = "OGC:CRS84")
+t3_b <- terra::rast(extent = c(-106, -100, 35, 45), resolution = 1, crs = "OGC:CRS84")
+t3_ga <- terra::xyFromCell(t3_a, 1:terra::ncell(t3_a))
+t3_gb <- terra::xyFromCell(t3_b, 1:terra::ncell(t3_b))
+expect_true(max(bf_fixed(t1_x, t1_y, t3_gb[, 1], t3_gb[, 2], 150)) <
+              max(bf_fixed(t1_x, t1_y, t3_ga[, 1], t3_ga[, 2], 150)),
+            info = "template dependence: template B has smaller d_max than A")
+t3_out_a <- terra::values(kde_adaptive(t1_pts, t3_a, pilot_bandwidth = 150, min_bandwidth = 15))[, 1]
+t3_out_b <- terra::values(kde_adaptive(t1_pts, t3_b, pilot_bandwidth = 150, min_bandwidth = 15))[, 1]
+t3_va <- t3_out_a[terra::cellFromXY(t3_a, cbind(-103.5, 38.5))]
+t3_vb <- t3_out_b[terra::cellFromXY(t3_b, cbind(-103.5, 38.5))]
+expect_true(abs(t3_va - t3_vb) > 1e-6 * abs(t3_va),
+            info = sprintf("template dependence: shared cell differs (A=%g, B=%g)", t3_va, t3_vb))
+
+# Test 33d: default min_bandwidth (NULL) equals explicit 0.1 * pilot_bandwidth.
+t4_default <- terra::values(kde_adaptive(t1_pts, t1_tpl, pilot_bandwidth = 150))[, 1]
+t4_explicit <- terra::values(kde_adaptive(t1_pts, t1_tpl, pilot_bandwidth = 150,
+                                          min_bandwidth = 0.1 * 150))[, 1]
+expect_identical(t4_default, t4_explicit, info = "default min_bandwidth equals 0.1 * pilot")
+
+# =============================================================================
 # Summary
 # =============================================================================
 # All tests completed
