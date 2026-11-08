@@ -79,7 +79,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 0.1.1
 - Status: DONE. Test gate now fails on failed or zero expectations. Revalidation of waves 0-5 passes.
-- Files changed: `Makefile` (new `TEST_FILE ?= inst/tinytest/test_geodensity.R` above `test:`; `test` recipe rewritten). `planning/STATE_1.md` (this section). `planning/tasks/0.1.1.todo.md` (new). Nothing committed; no git add, index, or tree changes beyond these.
+- Files changed: `Makefile` (new `TEST_FILE ?= inst/tinytest/test_geodensity.R` above `test:`; `test` recipe rewritten). `planning/STATE_1.md` (this section). `planning/tasks/1.0.1.todo.md` (new). Nothing committed; no git add, index, or tree changes beyond these.
 - Gate command (as written in Makefile):
   `Rscript -e "devtools::load_all(quiet=TRUE); r <- tinytest::run_test_file('$(TEST_FILE)'); d <- as.data.frame(r); n <- nrow(d); f <- sum(!d[['result']]); cat(sprintf('%d expectations, %d failed\n', n, f)); if (n == 0L || f > 0L) quit(status = 1L)"`
 - Step 1 check: `as.data.frame()` on the `run_test_file` result gives one row per expectation with a logical `result` column (class `tinytests`). Passed, no fallback needed.
@@ -99,7 +99,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.2
 - Status: DONE (uncommitted). Also closes 6.1.1: `central_lat` no longer appears in `geodesic_kde_rust` or `geodesic_kde_adaptive_rust` (`grep -n central_lat src/rust/src/lib.rs` returns nothing). 6.1.1 needs no separate edit.
-- Files changed: `src/rust/src/lib.rs` (shared helper `search_half_widths_deg`; both KDE functions use per-grid-point half-widths and offsets `ox`/`oy`; the 45-deg cell cap is kept), `inst/tinytest/test_geodensity.R` (brute-force references `bf_haversine_km`, `bf_destination`, `bf_fixed`, `bf_adaptive`, `bf_expect`, `bf_tangent_bearing`; new cases A-G before Summary), `planning/tasks/5.1.2.todo.md`, `planning/STATE_1.md` (this section).
+- Files changed: `src/rust/src/lib.rs` (shared helper `search_half_widths_deg`; both KDE functions use per-grid-point half-widths and offsets `ox`/`oy`; the 45-deg cell cap is kept), `inst/tinytest/test_geodensity.R` (brute-force references `bf_haversine_km`, `bf_destination`, `bf_fixed`, `bf_adaptive`, `bf_expect`, `bf_tangent_bearing`; new cases A-G before Summary), `planning/tasks/1.5.2.todo.md`, `planning/STATE_1.md` (this section).
 - Lat half-width: `cutoff_km / (R*pi/180)`, R = 6371.0088 km. Lon half-width: `asin(sin r / cos lat)` with `r = cutoff_km / R`. When `sin r / cos lat >= 1` (circle encloses a pole) the half-width is 180 deg. Cos guard: `|cos lat| <= 1e-9` gives 180 deg, so it can only widen the bound.
 - Pole-enclosing points (half-width >= 90 deg) scan all data points once. A wide index window reaches the same point under its natural and wrapped keys, which double counts (pre-fix: 6.86 vs reference 4.86).
 - make test: exit 0, `103 expectations, 0 failed`.
@@ -124,7 +124,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.3
 - Status: DONE (uncommitted). Test-only; no source changes.
-- Files changed: `inst/tinytest/test_geodensity.R` (new Test 33 block before Summary, reuses `bf_fixed`, `bf_adaptive`, `bf_expect`), `planning/tasks/5.1.3.todo.md`, `planning/STATE_1.md` (this section).
+- Files changed: `inst/tinytest/test_geodensity.R` (new Test 33 block before Summary, reuses `bf_fixed`, `bf_adaptive`, `bf_expect`), `planning/tasks/1.5.3.todo.md`, `planning/STATE_1.md` (this section).
 - make test: baseline exit 0 at `103 expectations, 0 failed`; after edits exit 0 at `112 expectations, 0 failed` (9 new expectations).
 - Tests:
   - 33a scaling formula: `kde_adaptive` vs `bf_adaptive` (pilot 150, min 15, 10x10 cells, 150 seeded points) at `bf_expect` 1e-10; plus `d_max > 0` and every brute-force scale in `[min, pilot]`. Fails if the scale formula, the pilot, or the per-cell cutoff changes.
@@ -138,7 +138,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 - Gotchas: the first template-B choice (lon -106..-99) included the global max cell, so `d_max` was unchanged and the shared cell did not differ. Moved B's east edge to -100. The 1-degree grid cell at (-99.5, 41.5) has ratio 1 and is the only cell where sqrt and no-sqrt agree. The "50 or more warnings" line from `make test` is pre-existing.
 
 ## 5.1.4
-- Status: DONE (uncommitted). Validation change in `R/geodensity.R`; tests in `inst/tinytest/test_geodensity.R` (new Test 34 block before Summary); `planning/tasks/5.1.4.todo.md`.
+- Status: DONE (uncommitted). Validation change in `R/geodensity.R`; tests in `inst/tinytest/test_geodensity.R` (new Test 34 block before Summary); `planning/tasks/1.5.4.todo.md`.
 - make test: baseline exit 0 at `112 expectations, 0 failed`. After 34a-34e (before validation): exit 0 at `120 expectations, 0 failed`. 34f added, red: exit 2 at `122 expectations, 2 failed` (both length-2 tests). After S10 validation: exit 0 at `122 expectations, 0 failed`.
 - Tests:
   - 34a LOOCV floor: `bandwidth_loocv_evaluate(c(-100,-20), c(40,0), 1)` equals `log(1e-10)` at tolerance 1e-12. Fails if the floor value or the mean normalization changes.
@@ -154,7 +154,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.5
 - Status: DONE (uncommitted). Normalization to probability density (Q1 = B, D10): each KDE output divided by `2*pi*bw^2*n` (fixed) or `2*pi*scale_i^2*n` (adaptive, per cell).
-- Files changed: `src/rust/src/lib.rs`, `inst/tinytest/test_geodensity.R`, `planning/tasks/5.1.5.todo.md` (plan), this report.
+- Files changed: `src/rust/src/lib.rs`, `inst/tinytest/test_geodensity.R`, `planning/tasks/1.5.5.todo.md` (plan), this report.
 - Division sites (`src/rust/src/lib.rs`):
   - `geodesic_kde_rust`: lines 148-150, after `.collect()`, `norm = 2*pi*bandwidth_km^2*x_coords.len()`, `densities.iter().map(|&d| d / norm).collect()`.
   - `geodesic_kde_adaptive_rust`: lines 304-311, after Pass 3 `.collect()`, `densities.iter().zip(scales.iter()).map(|(&d, &s)| d / (2*pi*s*s*n)).collect()`, `n = x_coords.len()`.
@@ -172,7 +172,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.6
 - Status: DONE (uncommitted). R roxygen documentation updated in `R/geodensity.R`.
-- Files changed: `R/geodensity.R` (roxygen blocks; two code lines wrapped per coordinator approval), `planning/tasks/5.1.6.todo.md` (plan), this report.
+- Files changed: `R/geodensity.R` (roxygen blocks; two code lines wrapped per coordinator approval), `planning/tasks/1.5.6.todo.md` (plan), this report.
 - Roxygen changes:
   - `kde_geodesic`: Rayon claim removed from description; `@return` states probability density per km² (kernel sum / `2*pi*bw^2*n`), planar approximation, integrates to approximately 1.
   - `kde_adaptive`: algorithm step 2 now states `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))` (matches `geodesic_kde_adaptive_rust`, `powf(0.5)`, `scale_factor`); old `pilot / sqrt(density)` wording removed. `@return` states per-km² normalization with per-cell `bw_i`. New `## Grid Dependence` details subsection.
@@ -188,7 +188,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.7
 - Status: DONE (uncommitted). Comment and whitespace only in `src/rust/src/lib.rs`.
-- Files changed: `src/rust/src/lib.rs`, `planning/tasks/5.1.7.todo.md` (plan), `planning/STATE_1.md` (this report).
+- Files changed: `src/rust/src/lib.rs`, `planning/tasks/1.5.7.todo.md` (plan), `planning/STATE_1.md` (this report).
 - Changes:
   - Item 1 (Vincenty): no edit needed. Already gone from HEAD.
   - Item 2: LOOCV kernel normalization comment now reads "2D Gaussian normalization (planar approximation)", with the no-1/n (D10) fact stated.
@@ -205,7 +205,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.8
 - Status: DONE with one deviation (see below). Uncommitted.
-- Files changed: `.Rbuildignore`, `DESCRIPTION`, `planning/tasks/5.1.8.todo.md` (plan), `planning/STATE_1.md` (this report).
+- Files changed: `.Rbuildignore`, `DESCRIPTION`, `planning/tasks/1.5.8.todo.md` (plan), `planning/STATE_1.md` (this report).
 - Changes:
   - F3: `^planning$` added to `.Rbuildignore` (line 12).
   - F10: duplicate `.github/` line removed. `^\.github$` kept. `.github/development/` kept.
@@ -222,7 +222,7 @@ _Workers append here, under `## {{id}}`, at most 15 lines each._
 
 ## 5.1.9
 - Status: DONE. Uncommitted.
-- Files changed: `README.Rmd` (2 paragraphs, 2 lines changed), `planning/tasks/5.1.9.todo.md` (plan), `planning/STATE_1.md` (this report).
+- Files changed: `README.Rmd` (2 paragraphs, 2 lines changed), `planning/tasks/1.5.9.todo.md` (plan), `planning/STATE_1.md` (this report).
 - Changes:
   - Adaptive section intro: "scales the bandwidth inversely with local density" replaced with "shrinks the bandwidth where local density is high, bounded between `min_bandwidth` and `pilot_bandwidth`".
   - Two-pass paragraph step (2): replaced "inversely with the pilot density" with the roxygen formula `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, definitions of `d_i` and `d_max`, the `[min_bandwidth, pilot_bandwidth]` bound, and a template-dependence sentence.

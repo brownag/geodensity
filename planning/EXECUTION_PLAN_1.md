@@ -113,7 +113,7 @@ Q1 resolved: B, probability density (D10). Task 5.1.5 is unblocked.
 ### Task 0.1.1 -- Test gate and revalidation
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `Makefile`. Can create: `planning/tasks/0.1.1.todo.md`, a `## 0.1.1` report in `planning/STATE_1.md`, scratch files under the scratchpad only.
+- **Files in scope.** Must edit: `Makefile`. Can create: `planning/tasks/1.0.1.todo.md`, a `## 0.1.1` report in `planning/STATE_1.md`, scratch files under the scratchpad only.
 - **Depends on:** 5.1.1 (done, `a0feeda`).
 - **Spec.**
   1. Change the `test` target to run tinytest through `tinytest::run_test_file()`, count expectations, and exit nonzero when any fails. Use a `TEST_FILE` variable defaulting to `inst/tinytest/test_geodensity.R`, so the gate can be pointed at a scratch file. Shape:
@@ -143,7 +143,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.2 -- Per-grid-latitude search sizing; independent brute-force KDE tests
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `src/rust/src/lib.rs`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/5.1.2.todo.md`, a `## 5.1.2` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `src/rust/src/lib.rs`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/1.5.2.todo.md`, a `## 5.1.2` report in `planning/STATE_1.md`.
 - **Depends on:** 0.1.1, 5.1.1.
 - **Spec.**
   1. Remove the dependence of the search extent on the mean input latitude. Derive the search extent per grid point: longitude half-width in degrees = `(3 * bw) / (111.32 * |cos(lat_grid)|)`, with the floor on `cos` kept, and latitude half-width = `(3 * bw) / 111.32`. For each grid point, compute its cell-offset range from these values. Keep the index cell size derived as now, but ensure it covers the largest needed half-width so that offsets stay bounded. Apply to both `geodesic_kde_rust` (bandwidth `bw`) and `geodesic_kde_adaptive_rust` (pilot bandwidth for the search, and each per-cell bandwidth for the cutoff).
@@ -163,7 +163,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.3 -- Independent adaptive tests (test-only)
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/5.1.3.todo.md`, a `## 5.1.3` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/1.5.3.todo.md`, a `## 5.1.3` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.2.
 - **Spec.** Test-only. No source changes. If any test fails, the code is wrong; stop and report.
   1. Scaling formula: for a seeded point set and template, compute pilot density by brute force, compute `d_max` as the maximum pilot value over the template, and check that the per-cell bandwidth from the implementation matches `min + (pilot - min)/(1 + sqrt(d/d_max))`. Expose per-cell bandwidth by comparing `kde_adaptive` against the brute-force adaptive reference from 5.1.2, which includes the scale step; this checks the formula through its effect on output.
@@ -177,7 +177,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.4 -- Scalar validation; S7 and LOOCV tests
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `R/geodensity.R`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/5.1.4.todo.md`, a `## 5.1.4` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `R/geodensity.R`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/1.5.4.todo.md`, a `## 5.1.4` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.3.
 - **Spec.**
   1. S10: in `bandwidth_optimize`, add `length(bandwidth_min) == 1` and `length(bandwidth_max) == 1` to the existing scalar checks, with an error message naming the argument.
@@ -192,7 +192,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.5 -- Normalization to probability density (Q1 = B)
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `src/rust/src/lib.rs`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/5.1.5.todo.md`, a `## 5.1.5` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `src/rust/src/lib.rs`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/1.5.5.todo.md`, a `## 5.1.5` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.4.
 - **Spec.** Divide each output by `2*pi*bw^2*n`, where `bw` is the fixed bandwidth or the per-cell bandwidth, and `n` is the number of input points. The division applies after accumulation, not inside the loop. Do not change the kernel exponent or the cutoff. The integral of the fixed-bandwidth output over the plane is approximately 1; record the measured integral on a dense grid in the report, as a sanity check, not as a test.
   Tests, against the brute-force reference from 5.1.2 divided by the same factor. Tolerance `1e-10`. Both fixed and adaptive paths. LOOCV is not changed by this task.
@@ -204,7 +204,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.6 -- R roxygen
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `R/geodensity.R`. Can create: `planning/tasks/5.1.6.todo.md`, a `## 5.1.6` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `R/geodensity.R`. Can create: `planning/tasks/1.5.6.todo.md`, a `## 5.1.6` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.5.
 - **Spec.** Documentation only; no code change.
   1. S1 and F1: the `kde_adaptive` algorithm text states the formula in code: `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is the pilot density at the cell and `d_max` is the maximum pilot density over the template. Remove the `pilot / sqrt(density)` description.
@@ -222,7 +222,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.7 -- Rust comments and whitespace
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `src/rust/src/lib.rs`. Can create: `planning/tasks/5.1.7.todo.md`, a `## 5.1.7` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `src/rust/src/lib.rs`. Can create: `planning/tasks/1.5.7.todo.md`, a `## 5.1.7` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.6.
 - **Spec.** Comment and whitespace changes only. No behavior change.
   1. F4: the comment near line 37 "Vincenty approximation" becomes "linear approximation of degree-to-km conversion".
@@ -237,7 +237,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.8 -- Build hygiene, verified on the built tarball
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `.Rbuildignore`, `DESCRIPTION`. Can create: `planning/tasks/5.1.8.todo.md`, a `## 5.1.8` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `.Rbuildignore`, `DESCRIPTION`. Can create: `planning/tasks/1.5.8.todo.md`, a `## 5.1.8` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.7.
 - **Spec.**
   1. F3: add `^planning$` to `.Rbuildignore`.
@@ -252,7 +252,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.9 -- README.Rmd adaptive description (S11)
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `README.Rmd`. Can create: `planning/tasks/5.1.9.todo.md`, a `## 5.1.9` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `README.Rmd`. Can create: `planning/tasks/1.5.9.todo.md`, a `## 5.1.9` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.8.
 - **Spec.** Fix the adaptive algorithm description in `README.Rmd` to match the formula in 5.1.6. Do not regenerate `README.md` here; `make readme` runs in 9.1.1.
 - **Anchors.** Grep `adaptive` and `sqrt` in `README.Rmd`.
@@ -262,7 +262,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 5.1.10 -- Re-record fingerprint baseline (D11, D14)
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `planning/STATE_1.md` (new baseline section only). Can create: `planning/tasks/5.1.10.todo.md`, a `## 5.1.10` report.
+- **Files in scope.** Must edit: `planning/STATE_1.md` (new baseline section only). Can create: `planning/tasks/1.5.10.todo.md`, a `## 5.1.10` report.
 - **Depends on:** 5.1.9.
 - **Spec.** Only after all correctness checks in 5.1.2-5.1.9 pass. Run the scratch `baseline.R` (in the scratchpad) on the current tree, and record the new `kde_geodesic` and `kde_adaptive` fingerprints and the LOOCV values. Mark the pre-wave-1 fingerprints superseded and keep them for reference. Confirm the LOOCV values still match Test 31's pinned values.
 - **Anchors.** Scratch script: `<scratchpad>/baseline.R`.
@@ -272,7 +272,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 6.1.1 -- Remove pre-existing empty-input guard in `geodesic_kde_rust` (D15)
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `src/rust/src/lib.rs`. Can create: `planning/tasks/6.1.1.todo.md`, a `## 6.1.1` report in `planning/STATE_1.md`.
+- **Files in scope.** Must edit: `src/rust/src/lib.rs`. Can create: `planning/tasks/1.6.1.todo.md`, a `## 6.1.1` report in `planning/STATE_1.md`.
 - **Depends on:** 5.1.10.
 - **Spec.** In `geodesic_kde_rust` only, replace the `if !y_coords.is_empty() { ... } else { 0.0 }` block for `central_lat` with the single expression used in 2.1.1. The R layer enforces the supported-input contract (D15).
 - **Anchors.** Grep `fn geodesic_kde_rust`, then `let central_lat`.
@@ -282,7 +282,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 7.1.1 -- Extract shared spatial-index helper
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `src/rust/src/lib.rs`. Can create: `planning/tasks/7.1.1.todo.md`, a `## 7.1.1` report.
+- **Files in scope.** Must edit: `src/rust/src/lib.rs`. Can create: `planning/tasks/1.7.1.todo.md`, a `## 7.1.1` report.
 - **Depends on:** 6.1.1.
 - **Spec.** Both KDE functions build the same spatial index. Extract that into one private helper that returns the index and the cell parameters, including the per-grid-point offset logic from 5.1.2. Both call sites keep their existing bandwidth arguments. Evaluation order and float arithmetic must not change.
 - **Anchors.** Grep `grid_index`, `index_cell_size`, `search_radius_cells`.
@@ -293,7 +293,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 8.1.1 -- Set `class(result)` to `"bandwidth_cv"` only
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `R/geodensity.R`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/8.1.1.todo.md`, a `## 8.1.1` report.
+- **Files in scope.** Must edit: `R/geodensity.R`, `inst/tinytest/test_geodensity.R`. Can create: `planning/tasks/1.8.1.todo.md`, a `## 8.1.1` report.
 - **Depends on:** 7.1.1.
 - **Spec.** In `bandwidth_optimize`, change `class(result) <- c("bandwidth_cv", "list")` to `class(result) <- "bandwidth_cv"`. Add a test asserting `class(bw) == "bandwidth_cv"` and `is.list(bw)` is still `TRUE`. Update the roxygen `@return` to say the object is a list with class `bandwidth_cv`.
 - **Anchors.** Grep `c("bandwidth_cv", "list")`.
@@ -304,7 +304,7 @@ Each task is one wave, serial (D4). Each behavior-changing task carries its own 
 ### Task 9.1.1 -- 0.2.0 release prep (no tag, no push)
 
 - **Repo:** geodensity
-- **Files in scope.** Must edit: `DESCRIPTION`. Can create: `NEWS.md`, `planning/tasks/9.1.1.todo.md`, a `## 9.1.1` report. Regenerated: `README.md`, `README.html`, `man/`, `NAMESPACE` (via `make docs` and `make readme`).
+- **Files in scope.** Must edit: `DESCRIPTION`. Can create: `NEWS.md`, `planning/tasks/1.9.1.todo.md`, a `## 9.1.1` report. Regenerated: `README.md`, `README.html`, `man/`, `NAMESPACE` (via `make docs` and `make readme`).
 - **Depends on:** 8.1.1.
 - **Spec.**
   1. Set `Version: 0.2.0` in `DESCRIPTION`.
