@@ -16,22 +16,26 @@ Resume from this file. The orchestrator is disposable.
 
 | Wave | Task | Status |
 | --- | --- | --- |
+| 0 | 0.1.1 Test gate and revalidation | done |
 | 1 | 1.1.1 remove LOOCV empty guard | done (ebb4b46) |
 | 2 | 2.1.1 simplify adaptive central_lat | done (c0df31e) |
 | 3 | 3.1.1 haversine to geo + LOOCV tolerance test | done (c220499) |
 | 4 | 4.1.1 spec-axis review (read-only) | done (planning/reviews/REVIEW_1_SPEC.md) |
 | 4 | 4.1.2 standards-axis review (read-only) | done (planning/reviews/REVIEW_1_STANDARDS.md) |
-| 5 | 5.1.1 search box uses larger lon/lat radius (S2) | pending |
-| 5 | 5.1.2 normalize KDE output to density per km² (S3, F6) | pending |
-| 5 | 5.1.3 update kde expectations, S7 tests, re-record baseline (D11) | pending |
-| 5 | 5.1.4 R roxygen and validation (S1, S3-S6, S8, S10, F2, F9) | pending |
-| 5 | 5.1.5 Rust comments and empty guard (F4, F5, F7, F8, F12) | pending |
-| 5 | 5.1.6 build hygiene (F3, F8 DESCRIPTION, F10) | pending |
-| 5 | 5.1.7 README.Rmd adaptive description (S11) | pending |
-| 6 | 6.1.1 remove pre-existing empty guard in geodesic_kde_rust | pending |
-| 7 | 7.1.1 extract shared spatial-index helper | pending |
-| 8 | 8.1.1 class(result) = "bandwidth_cv" | pending |
-| 9 | 9.1.1 0.2.0 release prep (no tag, no push) | pending |
+| 5 | 5.1.1 Search box uses the larger lon/lat radius | done |
+| 5 | 5.1.2 Per-grid-latitude search sizing; independent brute-force KDE tests | done |
+| 5 | 5.1.3 Independent adaptive tests: scaling formula, zero pilot, template dependence, default min | done |
+| 5 | 5.1.4 Scalar validation; S7 and LOOCV tests | done |
+| 5 | 5.1.5 Normalization to probability density; independent tests | done |
+| 5 | 5.1.6 R roxygen | done |
+| 5 | 5.1.7 Rust comments and whitespace | done |
+| 5 | 5.1.8 Build hygiene; verify built tarball | done |
+| 5 | 5.1.9 README.Rmd adaptive description | done |
+| 5 | 5.1.10 Re-record fingerprint baseline after correctness checks | done |
+| 6 | 6.1.1 Remove pre-existing empty-input guard in `geodesic_kde_rust` | done (closed by 5.1.2) |
+| 7 | 7.1.1 Extract shared spatial-index helper | done |
+| 8 | 8.1.1 Set `class(result)` to `bandwidth_cv` only; tests | done |
+| 9 | 9.1.1 0.2.0 release prep | done |
 
 ## Task reports
 
