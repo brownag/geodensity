@@ -745,6 +745,10 @@ expect_true(any(grepl("Bandwidth Cross-Validation Results", b34_out)),
 expect_true(any(grepl("Optimal bandwidth", b34_out)),
             info = "print.bandwidth_cv: optimal line")
 
+# Test 34c2: class is "bandwidth_cv" only, and the object is still a list.
+expect_equal(class(b34_res), "bandwidth_cv", info = "bandwidth_cv: class vector")
+expect_true(is.list(b34_res), info = "bandwidth_cv: is.list still TRUE")
+
 # Test 34d: S7 verbose output marks the optimum.
 b34_verbose <- capture.output(
   bandwidth_optimize(b34_pts, bandwidth_min = 50, bandwidth_max = 100,

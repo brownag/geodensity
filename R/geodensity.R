@@ -517,7 +517,7 @@ bandwidth_optimize <- function(
     log_likelihood = log_likelihoods,
     n_points = nrow(pts)
   )
-  class(result) <- c("bandwidth_cv", "list")
+  class(result) <- "bandwidth_cv"
 
   return(result)
 }
