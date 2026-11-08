@@ -38,7 +38,6 @@ crosses the international dateline seamlessly.
 ``` r
 library(geodensity)
 library(terra)
-#> terra 1.8.86
 
 # Simulate dense AIS data from a ship crossing the Pacific
 # Many points per location with jitter to simulate tracking updates and GPS uncertainty
@@ -112,7 +111,7 @@ dens <- kde_geodesic(pts_vec, template, bandwidth = 100)
 plot(dens, main = "AIS Ship Track Across Pacific\n(100 km bandwidth, ~148,000 positions)")
 ```
 
-<img src="man/figures/README-example-1.png" width="100%" />
+<img src="man/figures/README-example-1.png" alt="" width="100%" />
 
 The map demonstrates geodesic correctness: the large cluster centered
 exactly on +/-180 degrees appears split between the right edge (positive
@@ -143,11 +142,12 @@ hardware.
 ## Adaptive Bandwidth
 
 For datasets with highly variable point density, the `kde_adaptive()`
-function scales the bandwidth inversely with local density, producing
-finer detail in high-density regions and smoother estimates in sparse
-regions. This “balloon estimator” approach often yields better results
-for multi-scale point patterns (e.g., urban centers surrounded by sparse
-rural areas, marine hotspots in vast oceans).
+function shrinks the bandwidth where local density is high, bounded
+between `min_bandwidth` and `pilot_bandwidth`, producing finer detail in
+high-density regions and smoother estimates in sparse regions. This
+“balloon estimator” approach often yields better results for multi-scale
+point patterns (e.g., urban centers surrounded by sparse rural areas,
+marine hotspots in vast oceans).
 
 ``` r
 # Create sample data with variable density
@@ -182,12 +182,17 @@ plot(dens_adaptive, main = "Adaptive Bandwidth")
 plot(dens_fixed - dens_adaptive, main = "Difference")
 ```
 
-<img src="man/figures/README-adaptive-1.png" width="100%" />
+<img src="man/figures/README-adaptive-1.png" alt="" width="100%" />
 
 The algorithm uses a two-pass approach: (1) compute initial density with
-fixed pilot bandwidth, (2) scale bandwidth at each grid cell inversely
-with the pilot density, ensuring high-density regions get small kernels
-(detail) and sparse regions get large kernels (smoothness).
+fixed pilot bandwidth, (2) scale the bandwidth at each grid cell as
+`bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is
+the pilot density at the cell and `d_max` is the maximum pilot density
+over the template grid. The per-cell bandwidth lies in
+`[min_bandwidth, pilot_bandwidth]`: high-density cells get bandwidths
+near the minimum (detail), sparse cells get bandwidths near the pilot
+(smoothness). Because `d_max` is taken over the template, the same
+points on a different template can yield different bandwidths.
 
 ## Bandwidth Selection
 
@@ -228,7 +233,7 @@ dens_optimal <- kde_geodesic(pts_adaptive_vec, template_adaptive, bandwidth = bw
 plot(dens_optimal, main = paste("KDE with CV-selected bandwidth:", round(bw_cv$bandwidth_opt, 2), "km"))
 ```
 
-<img src="man/figures/README-bandwidth_optimization-1.png" width="100%" />
+<img src="man/figures/README-bandwidth_optimization-1.png" alt="" width="100%" />
 
 The function evaluates a sequence of candidate bandwidths and computes
 the leave-one-out log-likelihood for each. The bandwidth maximizing

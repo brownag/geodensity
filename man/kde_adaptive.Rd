@@ -27,6 +27,11 @@ bandwidth. Must be positive and less than \code{pilot_bandwidth}.}
 \value{
 A \code{SpatRaster} containing the adaptive kernel density estimates at each grid cell.
 Values represent the density of input points computed with locally-scaled kernels.
+Values are probability density per square kilometre: the kernel sum divided by
+\code{2 * pi * bw_i^2 * n}, where \code{bw_i} is the per-cell bandwidth and \code{n} is the number
+of input points. This is a planar approximation. The values integrate to approximately
+1 over the plane, not exactly, because of the spherical metric and the 3 * bw_i
+kernel truncation.
 }
 \description{
 Computes adaptive kernel density estimates where the bandwidth varies inversely with
@@ -38,8 +43,10 @@ when point density varies dramatically across the study area.
 The algorithm uses a two-pass approach:
 \enumerate{
 \item Compute pilot density with fixed \code{pilot_bandwidth}
-\item Scale bandwidth per grid cell as: \code{pilot_bandwidth / sqrt(pilot_density)},
-clamped to \verb{[min_bandwidth, pilot_bandwidth]}
+\item Scale bandwidth per grid cell as
+\code{bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))}, where \code{d_i} is the pilot
+density at the cell and \code{d_max} is the maximum pilot density over the template
+grid. The result lies in \verb{[min_bandwidth, pilot_bandwidth]}.
 \item Compute final density using the scaled per-cell bandwidths
 }
 \subsection{When to Use Adaptive KDE}{
@@ -59,6 +66,13 @@ Adaptive KDE is particularly useful for datasets with highly variable point dens
 \item Less over-smoothing of isolated features (larger bandwidth in sparse regions)
 \item Often better statistical properties for heterogeneous point patterns
 }
+}
+
+\subsection{Grid Dependence}{
+
+The per-cell bandwidth depends on the template raster. The pilot density is evaluated
+on the template cells and \code{d_max} is the template maximum, so the same points on a
+different template can yield different bandwidths.
 }
 }
 \examples{

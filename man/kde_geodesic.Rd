@@ -23,12 +23,16 @@ The effective range of the kernel extends to approximately 3 * bandwidth.}
 \value{
 A \code{SpatRaster} containing the kernel density estimates at each grid cell.
 Values represent the density of input points, with higher values indicating
-concentrated clustering and lower values indicating sparse regions.
+concentrated clustering and lower values indicating sparse regions. Values are
+probability density per square kilometre: the kernel sum divided by
+\code{2 * pi * bandwidth^2 * n}, where \code{n} is the number of input points. This is a
+planar approximation. The values integrate to approximately 1 over the plane, not
+exactly, because of the spherical metric and the 3 * bandwidth kernel truncation.
 }
 \description{
 Computes kernel density estimates on a geographic grid using geodesic (great-circle)
 distances. This function is optimized for large datasets and automatically parallelizes
-the computation across available CPU cores using Rust's Rayon library.
+the computation across available CPU cores in the Rust backend.
 }
 \details{
 The bandwidth parameter controls the smoothing level. It is specified in kilometers
