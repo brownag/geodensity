@@ -237,11 +237,7 @@ fn geodesic_kde_adaptive_rust(
         .collect();
 
     // Central latitude for index sizing (use pilot bandwidth for consistency)
-    let central_lat = if !y_coords.is_empty() {
-        y_coords.iter().sum::<f64>() / y_coords.len() as f64
-    } else {
-        0.0
-    };
+    let central_lat = y_coords.iter().sum::<f64>() / y_coords.len() as f64;
 
     let lat_rad = central_lat.to_radians();
     let cos_lat = lat_rad.cos();
