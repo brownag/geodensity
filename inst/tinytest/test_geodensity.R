@@ -783,6 +783,59 @@ expect_error(
 
 
 # =============================================================================
+# Test 35-series: spatial index edge cases (task 2.2.1)
+# =============================================================================
+
+# Test 35a: cutoff angular radius exceeds pi/2, requiring a scan of all longitudes.
+t35a_x <- c(-170, -90, 0, 90, 170)
+t35a_y <- rep(0, length(t35a_x))
+t35a_gx <- c(0, 120)
+t35a_gy <- c(0, 0)
+t35a_bw <- 4247
+bf_expect(
+  geodensity:::geodesic_kde_rust(t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw),
+  bf_fixed_norm(t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw),
+  "Test 35a fixed KDE with r >= pi/2"
+)
+bf_expect(
+  geodensity:::geodesic_kde_adaptive_rust(
+    t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw, 424.7
+  ),
+  bf_adaptive_norm(t35a_x, t35a_y, t35a_gx, t35a_gy, t35a_bw, 424.7)$density,
+  "Test 35a adaptive KDE with r >= pi/2"
+)
+
+# Test 35b: template longitudes in [0, 360] are equivalent to wrapped longitudes.
+t35b_x <- c(-80, -10, 170)
+t35b_y <- c(20, 20, 20)
+t35b_gx <- c(280, 350, 170, 190)
+t35b_gy <- rep(20, length(t35b_gx))
+t35b_bw <- 100
+bf_expect(
+  geodensity:::geodesic_kde_rust(t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw),
+  bf_fixed_norm(t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw),
+  "Test 35b fixed KDE with 0..360 grid longitudes"
+)
+bf_expect(
+  geodensity:::geodesic_kde_adaptive_rust(
+    t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw, 10
+  ),
+  bf_adaptive_norm(t35b_x, t35b_y, t35b_gx, t35b_gy, t35b_bw, 10)$density,
+  "Test 35b adaptive KDE with 0..360 grid longitudes"
+)
+
+# Test 35c: scan-all polar rows in a global template match brute force.
+t35c_x <- c(-120, -30, 45, 160)
+t35c_y <- c(-70, 10, 55, 80)
+t35c_gx <- rep(seq(-180, 180, by = 30), times = 7)
+t35c_gy <- rep(seq(-90, 90, by = 30), each = 13)
+bf_expect(
+  geodensity:::geodesic_kde_rust(t35c_x, t35c_y, t35c_gx, t35c_gy, 50),
+  bf_fixed_norm(t35c_x, t35c_y, t35c_gx, t35c_gy, 50),
+  "Test 35c fixed KDE on global template with polar rows"
+)
+
+# =============================================================================
 # Summary
 # =============================================================================
 # All tests completed

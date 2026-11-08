@@ -18,7 +18,7 @@ fn search_half_widths_deg(cutoff_km: f64, lat_deg: f64) -> (f64, f64) {
     let lat_hw = cutoff_km / km_per_lat;
     let r = cutoff_km / EARTH_RADIUS_KM;
     let cos_lat = lat_deg.to_radians().cos().abs();
-    let lon_hw = if cos_lat <= 1e-9 {
+    let lon_hw = if cos_lat <= 1e-9 || r >= std::f64::consts::FRAC_PI_2 {
         180.0
     } else {
         let s = r.sin() / cos_lat;
@@ -33,6 +33,7 @@ fn index_cell_size(grid_y: &[f64], cutoff_km: f64) -> f64 {
     let max_half_width_deg = grid_y
         .iter()
         .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
+        .filter(|&hw| hw < 90.0)
         .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
     (max_half_width_deg * 1.5)
         .max(0.1)
@@ -66,6 +67,39 @@ fn build_spatial_index(
         }
     }
     grid_index
+}
+
+fn visit_candidate_points<F: FnMut(usize)>(
+    gx: f64,
+    gy: f64,
+    cutoff_km: f64,
+    data_points: &[Point<f64>],
+    grid_index: &std::collections::HashMap<(i32, i32), Vec<usize>>,
+    index_cell_size: f64,
+    mut visit: F,
+) {
+    let (hw_lon, hw_lat) = search_half_widths_deg(cutoff_km, gy);
+    if hw_lon >= 90.0 {
+        for idx in 0..data_points.len() {
+            visit(idx);
+        }
+    } else {
+        let gx_wrapped = (gx + 180.0).rem_euclid(360.0) - 180.0;
+        let grid_x_key = (gx_wrapped / index_cell_size).floor() as i32;
+        let grid_y_key = (gy / index_cell_size).floor() as i32;
+        let ox = (hw_lon / index_cell_size).ceil() as i32;
+        let oy = (hw_lat / index_cell_size).ceil() as i32;
+
+        for dx in -ox..=ox {
+            for dy in -oy..=oy {
+                if let Some(point_indices) = grid_index.get(&(grid_x_key + dx, grid_y_key + dy)) {
+                    for &idx in point_indices {
+                        visit(idx);
+                    }
+                }
+            }
+        }
+    }
 }
 
 
@@ -113,31 +147,15 @@ fn geodesic_kde_rust(
                 }
             };
 
-            let (hw_lon, hw_lat) = search_half_widths_deg(cutoff_km, gy);
-            if hw_lon >= 90.0 {
-                // Circle encloses a pole: every longitude is in range. Scan all points once.
-                // (A wide window would reach one point under both its natural and wrapped keys.)
-                for idx in 0..data_points.len() {
-                    visit(idx);
-                }
-            } else {
-                let grid_x_key = (gx / index_cell_size).floor() as i32;
-                let grid_y_key = (gy / index_cell_size).floor() as i32;
-                let ox = (hw_lon / index_cell_size).ceil() as i32;
-                let oy = (hw_lat / index_cell_size).ceil() as i32;
-
-                // Search nearby grid cells within the per-point search box
-                for dx in -ox..=ox {
-                    for dy in -oy..=oy {
-                        let cell_key = (grid_x_key + dx, grid_y_key + dy);
-                        if let Some(point_indices) = grid_index.get(&cell_key) {
-                            for &idx in point_indices {
-                                visit(idx);
-                            }
-                        }
-                    }
-                }
-            }
+            visit_candidate_points(
+                gx,
+                gy,
+                cutoff_km,
+                &data_points,
+                &grid_index,
+                index_cell_size,
+                &mut visit,
+            );
             sum
         })
         .collect();
@@ -220,31 +238,15 @@ fn geodesic_kde_adaptive_rust(
                 }
             };
 
-            let (hw_lon, hw_lat) = search_half_widths_deg(cutoff_km, gy);
-            if hw_lon >= 90.0 {
-                // Circle encloses a pole: every longitude is in range. Scan all points once.
-                // (A wide window would reach one point under both its natural and wrapped keys.)
-                for idx in 0..data_points.len() {
-                    visit(idx);
-                }
-            } else {
-                let grid_x_key = (gx / index_cell_size).floor() as i32;
-                let grid_y_key = (gy / index_cell_size).floor() as i32;
-                let ox = (hw_lon / index_cell_size).ceil() as i32;
-                let oy = (hw_lat / index_cell_size).ceil() as i32;
-
-                // Search nearby grid cells within the per-point search box
-                for dx in -ox..=ox {
-                    for dy in -oy..=oy {
-                        let cell_key = (grid_x_key + dx, grid_y_key + dy);
-                        if let Some(point_indices) = grid_index.get(&cell_key) {
-                            for &idx in point_indices {
-                                visit(idx);
-                            }
-                        }
-                    }
-                }
-            }
+            visit_candidate_points(
+                gx,
+                gy,
+                cutoff_km,
+                &data_points,
+                &grid_index,
+                index_cell_size,
+                &mut visit,
+            );
             sum
         })
         .collect();
@@ -258,7 +260,7 @@ fn geodesic_kde_adaptive_rust(
         .collect()
 }
 
-/// Leave-one-out CV log-likelihood for each bandwidth (serial; O(n^2) distance matrix).
+/// Leave-one-out CV log-likelihood for each bandwidth (serial; O(n * B) memory).
 #[extendr]
 fn bandwidth_loocv_evaluate(
     x_coords: Vec<f64>,
@@ -267,54 +269,31 @@ fn bandwidth_loocv_evaluate(
 ) -> Vec<f64> {
     let n_points = x_coords.len();
 
-    // Precompute all pairwise distances (expensive but needed for LOOCV)
-    let mut distances = vec![vec![0.0; n_points]; n_points];
+    let mut densities = vec![vec![0.0f64; n_points]; bandwidths.len()];
+    let norms: Vec<f64> = bandwidths
+        .iter()
+        .map(|&bw| 1.0 / (2.0 * std::f64::consts::PI * bw * bw))
+        .collect();
 
     for i in 0..n_points {
         for j in (i + 1)..n_points {
-            let dist = geo::Point::new(x_coords[i], y_coords[i])
-                .haversine_distance(&geo::Point::new(x_coords[j], y_coords[j])) / 1000.0;
-            distances[i][j] = dist;
-            distances[j][i] = dist;
+            let dist_km = geo::Point::new(x_coords[i], y_coords[i])
+                .haversine_distance(&geo::Point::new(x_coords[j], y_coords[j]))
+                / 1000.0;
+            for (b, &bw) in bandwidths.iter().enumerate() {
+                let k = norms[b] * (-0.5 * (dist_km / bw).powi(2)).exp();
+                densities[b][i] += k;
+                densities[b][j] += k;
+            }
         }
     }
 
-    // Evaluate each bandwidth
-    let log_likelihoods: Vec<f64> = bandwidths
+    densities
         .iter()
-        .map(|&bw| {
-            // For this bandwidth, compute LOOCV score
-            let mut log_lik_sum = 0.0;
-            let epsilon = 1e-10;
-
-            // 2D Gaussian normalization (planar approximation): 1 / (2 * pi * bw^2).
-            // No 1/n factor: intensity, not probability density (D10).
-            let kernel_norm = 1.0 / (2.0 * std::f64::consts::PI * bw * bw);
-
-            for test_idx in 0..n_points {
-                // Compute density at test_idx using all OTHER points
-                let mut density = 0.0;
-
-                for j in 0..n_points {
-                    if j == test_idx {
-                        continue; // Leave-one-out: exclude self
-                    }
-
-                    let dist_km = distances[test_idx][j];
-                    let kernel_val = kernel_norm * (-0.5 * (dist_km / bw).powi(2)).exp();
-                    density += kernel_val;
-                }
-
-                // Add log-likelihood for this point (avoid log(0))
-                log_lik_sum += (density.max(epsilon)).ln();
-            }
-
-            // Return average log-likelihood for this bandwidth
-            log_lik_sum / n_points as f64
+        .map(|density| {
+            density.iter().map(|&d| d.max(1e-10).ln()).sum::<f64>() / n_points as f64
         })
-        .collect();
-
-    log_likelihoods
+        .collect()
 }
 
 // Macro to generate exports.
