@@ -3,34 +3,6 @@ use geo::prelude::*;
 use geo::Point;
 use rayon::prelude::*;
 
-/// Calculate geodesic distance in kilometers using Haversine formula
-///
-/// Computes great-circle distance between two points on Earth using the
-/// Haversine formula. Suitable for all geographic coordinate pairs.
-///
-/// Algorithm: d = 2 * R * asin(sqrt(sin^2((lat2-lat1)/2) + cos(lat1)*cos(lat2)*sin^2((lon2-lon1)/2)))
-/// where R = 6371 km (Earth's mean radius)
-///
-/// @param lon1 Longitude of first point in degrees
-/// @param lat1 Latitude of first point in degrees
-/// @param lon2 Longitude of second point in degrees
-/// @param lat2 Latitude of second point in degrees
-/// @return Distance in kilometers
-fn haversine_distance_km(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
-    const EARTH_RADIUS_KM: f64 = 6371.0;
-    
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
-    
-    let a = (delta_lat / 2.0).sin().powi(2) +
-            lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    
-    EARTH_RADIUS_KM * c
-}
-
 /// Compute Geodesic Kernel Density Estimate with spatial indexing
 ///
 /// This function calculates kernel density estimates on a geographic grid using geodesic
@@ -345,10 +317,8 @@ fn bandwidth_loocv_evaluate(
     
     for i in 0..n_points {
         for j in (i + 1)..n_points {
-            let dist = haversine_distance_km(
-                x_coords[i], y_coords[i],
-                x_coords[j], y_coords[j]
-            );
+            let dist = geo::Point::new(x_coords[i], y_coords[i])
+                .haversine_distance(&geo::Point::new(x_coords[j], y_coords[j])) / 1000.0;
             distances[i][j] = dist;
             distances[j][i] = dist;
         }

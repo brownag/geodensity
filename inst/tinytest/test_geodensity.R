@@ -418,6 +418,27 @@ expect_true(
 
 
 # =============================================================================
+# Test 31: LOOCV bandwidth_optimize baseline (geo haversine, tolerance 1e-5)
+# =============================================================================
+set.seed(42)
+pts_data <- data.frame(lon = c(rnorm(100, -100, 2), rnorm(50, -95, 1)),
+                       lat = c(rnorm(100, 40, 2), rnorm(50, 38, 1)))
+pts <- terra::vect(pts_data, geom = c("lon", "lat"), crs = "EPSG:4326")
+res <- bandwidth_optimize(pts, bandwidth_min = 1, bandwidth_max = 50,
+                          n_bandwidths = 8, verbose = FALSE)
+
+expect_equal(
+  res$log_likelihood,
+  c(-22.740032207, -22.209357431, -20.488981758, -17.765337732,
+    -13.906234260, -10.772277308, -9.015811849, -8.595541678),
+  tolerance = 1e-5,
+  info = "LOOCV log-likelihoods should match baseline"
+)
+# Optimum sits on the top grid edge (boundary value; do not move the grid)
+expect_equal(res$bandwidth_opt, 50)
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 # All tests completed
