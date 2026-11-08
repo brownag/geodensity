@@ -343,9 +343,6 @@ fn bandwidth_loocv_evaluate(
     bandwidths: Vec<f64>,
 ) -> Vec<f64> {
     let n_points = x_coords.len();
-    if n_points == 0 || bandwidths.is_empty() {
-        return vec![];
-    }
 
     // Precompute all pairwise distances (expensive but needed for LOOCV)
     let mut distances = vec![vec![0.0; n_points]; n_points];
