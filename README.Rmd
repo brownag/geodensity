@@ -121,7 +121,7 @@ Runtime depends on grid resolution, the number of input points, and bandwidth. T
 
 ## Adaptive Bandwidth
 
-For datasets with highly variable point density, the `kde_adaptive()` function scales the bandwidth inversely with local density, producing finer detail in high-density regions and smoother estimates in sparse regions. This "balloon estimator" approach often yields better results for multi-scale point patterns (e.g., urban centers surrounded by sparse rural areas, marine hotspots in vast oceans).
+For datasets with highly variable point density, the `kde_adaptive()` function shrinks the bandwidth where local density is high, bounded between `min_bandwidth` and `pilot_bandwidth`, producing finer detail in high-density regions and smoother estimates in sparse regions. This "balloon estimator" approach often yields better results for multi-scale point patterns (e.g., urban centers surrounded by sparse rural areas, marine hotspots in vast oceans).
 
 ```{r adaptive}
 # Create sample data with variable density
@@ -154,7 +154,7 @@ plot(dens_adaptive, main = "Adaptive Bandwidth")
 plot(dens_fixed - dens_adaptive, main = "Difference")
 ```
 
-The algorithm uses a two-pass approach: (1) compute initial density with fixed pilot bandwidth, (2) scale bandwidth at each grid cell inversely with the pilot density, ensuring high-density regions get small kernels (detail) and sparse regions get large kernels (smoothness).
+The algorithm uses a two-pass approach: (1) compute initial density with fixed pilot bandwidth, (2) scale the bandwidth at each grid cell as `bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is the pilot density at the cell and `d_max` is the maximum pilot density over the template grid. The per-cell bandwidth lies in `[min_bandwidth, pilot_bandwidth]`: high-density cells get bandwidths near the minimum (detail), sparse cells get bandwidths near the pilot (smoothness). Because `d_max` is taken over the template, the same points on a different template can yield different bandwidths.
 
 ## Bandwidth Selection
 
