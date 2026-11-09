@@ -327,9 +327,8 @@ expect_true(
 
 
 # =============================================================================
-# Test 26: Adaptive KDE is executable (may match fixed for tiny sample)
+# Test 26: Adaptive KDE is executable
 # =============================================================================
-result_fixed_50 <- kde_geodesic(pts_vec, template, bandwidth = 50)
 result_adaptive_50 <- kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = 5)
 
 expect_true(
@@ -360,8 +359,7 @@ template_clustered <- terra::rast(
   crs = "OGC:CRS84"
 )
 
-# Compute both fixed and adaptive
-result_fixed_cluster <- kde_geodesic(pts_clustered, template_clustered, bandwidth = 50)
+# Compute adaptive
 result_adaptive_cluster <- kde_adaptive(pts_clustered, template_clustered, 
                                         pilot_bandwidth = 50, min_bandwidth = 5)
 
@@ -414,14 +412,10 @@ expect_true(
 
 
 # =============================================================================
-# Test 30: Default min_bandwidth is 10% of pilot
+# Test 30: Adaptive KDE works with default min_bandwidth
 # =============================================================================
 # Compute with implicit default
 result_default_min <- kde_adaptive(pts_clustered, template_clustered, pilot_bandwidth = 50)
-
-# Compute with explicit 10% minimum (0.1 * 50 = 5)
-result_explicit_min <- kde_adaptive(pts_clustered, template_clustered, 
-                                    pilot_bandwidth = 50, min_bandwidth = 5)
 
 expect_true(
   inherits(result_default_min, "SpatRaster"),
@@ -483,19 +477,6 @@ bf_fixed <- function(x, y, gx, gy, bw) {
     d <- bf_haversine_km(x, y, gx[i], gy[i])
     keep <- d < 3 * bw
     sum(exp(-0.5 * (d[keep] / bw)^2))
-  }, numeric(1))
-}
-
-# Adaptive reference: brute-force pilot, per-cell scale, brute-force sum with cutoff 3*scale
-bf_adaptive <- function(x, y, gx, gy, pilot, min_bw) {
-  p <- bf_fixed(x, y, gx, gy, pilot)
-  dmax <- max(p)
-  ratio <- if (dmax > 0) p / dmax else rep(0, length(p))
-  scale <- min_bw + (pilot - min_bw) / (1 + sqrt(ratio))
-  vapply(seq_along(gx), function(i) {
-    d <- bf_haversine_km(x, y, gx[i], gy[i])
-    keep <- d < 3 * scale[i]
-    sum(exp(-0.5 * (d[keep] / scale[i])^2))
   }, numeric(1))
 }
 
@@ -694,7 +675,7 @@ bf_expect(geodensity:::geodesic_kde_adaptive_rust(g_da[1], g_da[2], -90 - 1e-9, 
 
 # =============================================================================
 # Test 33-series: independent adaptive checks (task 5.1.3)
-# Reuses bf_fixed / bf_adaptive / bf_expect above. Scale uses the brute-force pilot.
+# Reuses bf_fixed / bf_adaptive_norm / bf_expect above. Scale uses the brute-force pilot.
 # =============================================================================
 
 # Test 33a: scaling formula through its effect on output.
