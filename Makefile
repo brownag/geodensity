@@ -1,4 +1,4 @@
-.PHONY: help build test install clean docs dev-setup check lint format vendor all
+.PHONY: help build test install clean docs dev-setup check lint clippy format vendor all readme
 
 # Default target
 help:
@@ -11,8 +11,10 @@ help:
 	@echo "  make install     - Install package to library"
 	@echo "  make load        - Load package in development mode"
 	@echo "  make docs        - Generate roxygen2 documentation"
+	@echo "  make readme      - Render README.Rmd to README.md and README.html"
 	@echo "  make check       - Run R CMD check (full validation)"
-	@echo "  make lint        - Check for code issues"
+	@echo "  make lint        - Check for code issues (R + Rust)"
+	@echo "  make clippy      - Run cargo clippy on Rust backend"
 	@echo "  make format      - Auto-format code"
 	@echo "  make clean       - Clean build artifacts"
 	@echo "  make distclean   - Deep clean (removes compiled objects)"
@@ -23,7 +25,14 @@ help:
 # Regenerate vendor.tar.xz from Cargo.lock (kept out of git but needed for distribution)
 vendor:
 	@echo "Regenerating vendored Rust dependencies..."
-	@Rscript -e "rextendr::vendor_pkgs(path='src/rust')" 2>&1 | grep -v "^Crate collection" || true
+	@output=$$(mktemp); \
+	if Rscript -e "if (!requireNamespace('rextendr', quietly=TRUE) || utils::packageVersion('rextendr') < '0.5.0') stop('make vendor requires rextendr >= 0.5.0'); rextendr::vendor_crates(path='src/rust')" >$$output 2>&1; then \
+		grep -v "^Crate collection" $$output || true; \
+		rm -f $$output; \
+	else \
+		status=$$?; grep -v "^Crate collection" $$output || true; \
+		rm -f $$output; exit $$status; \
+	fi
 	@if [ -f "src/rust/vendor.tar.xz" ]; then \
 		echo "[OK] vendor.tar.xz created successfully"; \
 	else \
@@ -39,10 +48,11 @@ build: vendor
 	@echo "  - Preparing R package..."
 	@Rscript -e "devtools::load_all(quiet=TRUE); cat('Build successful!\n')"
 
-# Run tests
+# Run tests (exits nonzero on any failed expectation or zero expectations)
+TEST_FILE ?= inst/tinytest/test_geodensity.R
 test:
 	@echo "Running test suite..."
-	@Rscript -e "devtools::load_all(quiet=TRUE); source('inst/tinytest/test_geodensity.R')"
+	@Rscript -e "devtools::load_all(quiet=TRUE); r <- tinytest::run_test_file('$(TEST_FILE)'); d <- as.data.frame(r); n <- nrow(d); f <- sum(!d[['result']]); cat(sprintf('%d expectations, %d failed\n', n, f)); if (n == 0L || f > 0L) quit(status = 1L)"
 
 # Install to library
 install: docs
@@ -61,14 +71,25 @@ docs:
 	@Rscript -e "roxygen2::roxygenise()"
 	@echo "Documentation generated!"
 
+# Render README.Rmd to README.md and README.html
+readme:
+	@echo "Rendering README.Rmd..."
+	@Rscript -e "devtools::load_all(quiet=TRUE); rmarkdown::render('README.Rmd', output_format='all', quiet=TRUE); cat('README rendered to README.md and README.html\n')"
+
 # Full R CMD check
 check: vendor docs
 	@echo "Running R CMD check..."
 	@Rscript -e "devtools::check()"
 
-# Lint code for issues
-lint:
-	@echo "Checking for code issues..."
+# Run Clippy on Rust backend
+clippy:
+	@echo "Running cargo clippy..."
+	@cargo clippy --manifest-path src/rust/Cargo.toml --all-targets -- -D warnings
+	@echo "Clippy check complete!"
+
+# Lint code for issues (R + Rust)
+lint: clippy
+	@echo "Checking for code issues in R..."
 	@Rscript -e "lintr::lint_dir('R/')" || true
 	@echo "Lint check complete!"
 
@@ -108,4 +129,3 @@ all: build docs test
 	@echo "=========================================="
 	@echo "Build, documentation, and tests complete!"
 	@echo "=========================================="
-
