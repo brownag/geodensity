@@ -6,3 +6,4 @@ src/rust/vendor.tar.xz
 README.html
 /planning/
 TODO.md
+*.png
