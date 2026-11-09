@@ -191,7 +191,7 @@ plot(dens_fixed - dens_adaptive, main = "Difference (Fixed - Adaptive)")
 ### Normalization and Interpretation
 * **Probability Density**: Density values are expressed in probability density per square kilometre (km⁻²).
 * **Balloon Estimator**: Locally normalized per grid cell; suited for visual contrast and hotspot discovery.
-* **Sample-Point Estimator**: Individual kernels are normalized per point and integrate to approximately 1 over the spherical domain.
+* **Sample-Point Estimator**: Each point's kernel is normalized per point and integrates to approximately 1/n over the spherical domain, so the sum over all points integrates to approximately 1 (under planar normalization).
 
 ---
 
