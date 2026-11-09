@@ -320,6 +320,10 @@ kde_adaptive <- function(
     )
   }
 
+  if (!terra::same.crs(x, r)) {
+    stop("Input points and template raster must use the same CRS")
+  }
+
   # Extract coordinates from the SpatVector
   pts <- terra::crds(x)
 

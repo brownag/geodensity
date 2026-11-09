@@ -376,6 +376,18 @@ expect_true(
 # =============================================================================
 # Test 28: Validation - min_bandwidth validation
 # =============================================================================
+pts_epsg4269 <- terra::project(pts_vec, "EPSG:4269")
+template_crs84 <- terra::rast(
+  extent = c(-120, -70, 30, 45),
+  resolution = 2,
+  crs = "OGC:CRS84"
+)
+expect_error(
+  kde_adaptive(pts_epsg4269, template_crs84, pilot_bandwidth = 50),
+  pattern = "same CRS",
+  info = "Should reject points and template using different geographic CRSs"
+)
+
 expect_error(
   kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = -5),
   info = "Should reject negative min_bandwidth"
