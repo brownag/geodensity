@@ -1,7 +1,6 @@
 Package: geodensity
 Title: Geodesic Kernel Density Estimation for Spatial Data
 Version: 0.2.0
-Maintainer: Andrew Gene Brown <brown.andrewg@gmail.com>
 Authors@R: person(
     given = c("Andrew", "Gene"),
     family = "Brown",
