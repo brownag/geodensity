@@ -3,159 +3,183 @@
 
 # geodensity
 
-<!-- badges: here -->
+<!-- badges: start -->
+
+[![R-CMD-check](https://github.com/brownag/geodensity/actions/workflows/R-CMD-check.yml/badge.svg)](https://github.com/brownag/geodensity/actions/workflows/R-CMD-check.yml)
+[![License:
+CC0-1.0](https://img.shields.io/badge/License-CC0_1.0-lightgrey.svg)](https://creativecommons.org/publicdomain/zero/1.0/)
+[![Rust
+1.80+](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
+<!-- badges: end -->
 
 Fast kernel density estimation on geographic grids using geodesic
 (great-circle) distances.
 
-## Why geodesic KDE?
+## Overview
 
-Traditional kernel density estimation uses Euclidean distance, which is
-inappropriate for geographic data on a sphere. The `geodensity` package
-computes distances using the **Haversine formula**, accurately
-accounting for Earth’s curvature without the need to reproject data into
-planar coordinate systems.
+Traditional kernel density estimation (KDE) relies on Euclidean planar
+distance, which causes severe geometric distortion for geographic
+coordinates on a sphere and fails at boundaries like the international
+dateline.
 
-The implementation is optimized for speed, parallelizing computation
-across CPU cores using Rust’s Rayon library. Typical analyses with
-thousands to millions of points complete in seconds to minutes.
+The **`geodensity`** package computes kernel density estimates directly
+on geographic coordinates (longitude/latitude) using great-circle
+geodesic distances via the **Haversine formula**. The computationally
+intensive steps are implemented in a high-performance Rust backend using
+**Rayon** for multi-core parallelization, scaling effortlessly to
+millions of point locations.
+
+### Key Features
+
+- **Geodesic Correctness**: True great-circle distance accounting for
+  spherical curvature without requiring planar map reprojection.
+- **Antimeridian & Pole Handling**: Automatic wrapping across the
+  international dateline (±180° longitude) and proper high-latitude
+  geometry.
+- **High-Performance Rust Backend**: Multi-threaded parallel evaluation
+  with spatial indexing and adaptive bounding boxes via `extendr` and
+  `rayon`.
+- **Fixed & Adaptive Bandwidth**: Standard fixed-bandwidth KDE as well
+  as adaptive-bandwidth methods (`"balloon"` and `"sample_point"`).
+- **Automated Bandwidth Selection**: Leave-one-out cross-validation
+  (`bandwidth_optimize()`) to objectively select optimal smoothing
+  parameters.
+- **Spatial Ecosystem Integration**: Seamless interoperability with
+  `terra` (`SpatVector`, `SpatRaster`) and `sf` point geometries.
 
 ## Installation
 
+You can install the development version of `geodensity` from GitHub:
+
 ``` r
-# Install from GitHub (when available)
+# Using pak
+pak::pkg_install("brownag/geodensity")
+
+# Or using remotes
 remotes::install_github("brownag/geodensity")
 ```
 
+### System Requirements
+
+Building from source requires:
+
+- **R** (\>= 4.2)
+- **Rust** (\>= 1.80) and `cargo`
+
+## Core Functions
+
+| Function                                                   | Description                            | Primary Inputs                                                          |
+|:-----------------------------------------------------------|:---------------------------------------|:------------------------------------------------------------------------|
+| [`kde_geodesic()`](#example-ship-track-across-the-pacific) | Fixed-bandwidth geodesic KDE           | Points (`x`), Template raster (`r`), `bandwidth` (km)                   |
+| [`kde_adaptive()`](#adaptive-bandwidth)                    | Adaptive-bandwidth geodesic KDE        | Points (`x`), Template raster (`r`), `pilot_bandwidth`, `min_bandwidth` |
+| [`bandwidth_optimize()`](#bandwidth-selection)             | Leave-one-out cross-validation (LOOCV) | Points (`x`), `bandwidth_min`, `bandwidth_max`, `n_bandwidths`          |
+
+> **Note**: Input points and raster templates must be in a **Geographic
+> CRS** (unprojected longitude/latitude, such as `EPSG:4326` or
+> `OGC:CRS84`).
+
+------------------------------------------------------------------------
+
 ## Example: Ship Track Across the Pacific
 
-To demonstrate geodesic correctness with spatially structured data,
-consider AIS (ship position) data from a vessel crossing the Pacific
-Ocean. Dense point clusters occur where the ship moved slowly or was
-stationary, while sparse points mark fast transit segments. This example
-crosses the international dateline seamlessly.
+To demonstrate geodesic accuracy and dateline wrapping, consider
+simulated AIS (ship position) data from a vessel traversing the Pacific
+Ocean across the international dateline (±180° longitude).
 
 ``` r
 library(geodensity)
 library(terra)
 
-# Simulate dense AIS data from a ship crossing the Pacific
-# Many points per location with jitter to simulate tracking updates and GPS uncertainty
-# Latitudinal error is exaggerated for clarity in "wide" visualization spanning -180 to 180 degrees
+# Simulate dense AIS positions across the Pacific
+# Points cluster at slow/stopped locations and disperse during fast transit
+set.seed(123)
 
-# Fast transit (sparse points with minimal jitter)
 fast1 <- data.frame(
   lon = rnorm(3000, mean = 140, sd = 0.5),
   lat = rnorm(3000, mean = 15, sd = 2)
 )
-
-# Slow/stopped segment (much denser cluster)
 slow1 <- data.frame(
   lon = rnorm(30000, mean = 148, sd = 1),
   lat = rnorm(30000, mean = 15, sd = 3)
 )
-
-# Fast transit
 fast2 <- data.frame(
   lon = rnorm(4000, mean = 156, sd = 0.5),
   lat = rnorm(4000, mean = 15, sd = 2)
 )
-
-# Another slow/stopped segment
 slow2 <- data.frame(
   lon = rnorm(35000, mean = 165, sd = 1.2),
   lat = rnorm(35000, mean = 15, sd = 3.5)
 )
 
-# Major cluster EXACTLY ON the dateline (will split left/right on map)
+# Major cluster centered exactly on the dateline (+/- 180 degrees)
 dateline_cluster <- data.frame(
   lon = rnorm(40000, mean = 180, sd = 2),
   lat = rnorm(40000, mean = 15, sd = 3)
 )
 
-# Cross the dateline with sparse points
 crossing <- data.frame(
   lon = c(rep(170, 100), rep(173, 100), rep(176, 100), rep(-176, 100), rep(-173, 100), rep(-170, 100)),
   lat = rnorm(600, mean = 15, sd = 1)
 )
-
-# Slow/stopped segment on the eastern side
 slow3 <- data.frame(
   lon = rnorm(32000, mean = -162, sd = 1.2),
   lat = rnorm(32000, mean = 15, sd = 3.5)
 )
-
-# Final fast transit
 fast3 <- data.frame(
   lon = rnorm(3500, mean = -150, sd = 0.5),
   lat = rnorm(3500, mean = 15, sd = 2)
 )
 
-# Combine all segments
 pts <- rbind(fast1, slow1, fast2, slow2, dateline_cluster, crossing, slow3, fast3)
 pts_vec <- terra::vect(pts, geom = c("lon", "lat"), crs = "OGC:CRS84")
 
-# Create a full world template raster from -180 to 180
-# Expanded latitude range to show density patterns clearly
+# Create an output template raster spanning the Pacific basin
 template <- terra::rast(
   extent = c(-180, 180, 0, 30),
   resolution = 0.25,
   crs = "OGC:CRS84"
 )
 
-# Compute kernel density with sharp bandwidth to show individual clusters
+# Compute geodesic kernel density estimate
 dens <- kde_geodesic(pts_vec, template, bandwidth = 100)
 #> Computing geodesic KDE: 148100 points, 172800 grid cells, 100.0 km bandwidth
 
-# Visualize
+# Visualize density surface
 plot(dens, main = "AIS Ship Track Across Pacific\n(100 km bandwidth, ~148,000 positions)")
 ```
 
 <img src="man/figures/README-example-1.png" alt="" width="100%" />
 
-The map demonstrates geodesic correctness: the large cluster centered
-exactly on +/-180 degrees appears split between the right edge (positive
-180 degrees) and left edge (negative -180 degrees), even though it is
-geographically a single cohesive point cluster. The densest peaks show
-periods of slow or stationary movement, while transit segments appear as
-low-density corridors. Euclidean methods would fail catastrophically
-here, treating the left and right edges as being on opposite sides of
-the planet.
+The resulting density surface illustrates geodesic continuity across the
+antimeridian: the point cluster centered at 180° splits seamlessly
+between the far right (+180°) and far left (-180°) of the raster extent.
+Planar Euclidean KDE would treat the edges as opposing ends of the map,
+producing artificial boundary artifacts and severe distortion.
 
-## Performance
-
-Computation is parallelized across all available CPU cores. Memory usage
-is proportional to the grid size (the output raster), not the number of
-input points, making the algorithm suitable for processing very large
-point datasets.
-
-Runtime depends on grid resolution, the number of input points, and
-bandwidth. The spatial indexing used internally scales well: increasing
-point count generally has less impact on execution time than increasing
-grid resolution, as points beyond the bandwidth are automatically
-skipped. Bandwidth also affects performance (larger bandwidths require
-searching more nearby grid cells), but this relationship is sublinear.
-For typical analyses with thousands to millions of points and moderate
-resolutions, computation completes within seconds to minutes on standard
-hardware.
+------------------------------------------------------------------------
 
 ## Adaptive Bandwidth
 
-For datasets with highly variable point density, `kde_adaptive()` offers
-two methods: `"balloon"` (the default) varies bandwidth by evaluation
-grid cell, while `"sample_point"` varies it by input data point. The
-`scaling` option selects `"ratio"` (the default) or `"linear_sqrt"`.
-With positive `d_max`, ratio scaling ranges from
-`(min_bandwidth + pilot_bandwidth) / 2` to `pilot_bandwidth`—27.5 to 50
-km when `min_bandwidth = 5` and `pilot_bandwidth = 50`—while linear-sqrt
-scaling spans the full `[min_bandwidth, pilot_bandwidth]` range. Balloon
-estimates are normalized locally per grid cell and are not guaranteed to
-have unit mass; sample-point estimates normalize each input point’s
-kernel and integrate to approximately 1. Both methods can provide finer
-detail in dense regions and smoother estimates in sparse regions.
+For point patterns with heterogeneous density—such as dense urban
+clusters surrounded by sparse rural landscapes—fixed bandwidths can
+over-smooth dense clusters or under-smooth sparse regions.
+
+`kde_adaptive()` provides two adaptive estimators:
+
+- **`method = "balloon"`** (default): Evaluates pilot density at each
+  grid cell and dynamically scales the evaluation bandwidth per cell.
+- **`method = "sample_point"`**: Evaluates pilot density at each input
+  data point and scales the bandwidth individual to that point.
+
+Bandwidth scaling is parameterized by `scaling`:
+
+- **`"ratio"`** (default):
+  `bw = min + (pilot - min) / (1 + sqrt(d / d_max))`
+- **`"linear_sqrt"`**:
+  `bw = min + (pilot - min) * (1 - sqrt(d / d_max))`
 
 ``` r
-# Create sample data with variable density
+# Generate sample data with clustered and sparse distributions
 set.seed(42)
 dense_cluster <- data.frame(
   lon = rnorm(500, mean = -100, sd = 0.5),
@@ -174,40 +198,45 @@ template_adaptive <- terra::rast(
   crs = "EPSG:4326"
 )
 
-# Compute adaptive and fixed density for comparison
+# Compute fixed vs adaptive KDE
 dens_fixed <- kde_geodesic(pts_adaptive_vec, template_adaptive, bandwidth = 50)
 #> Computing geodesic KDE: 600 points, 40000 grid cells, 50.0 km bandwidth
-dens_adaptive <- kde_adaptive(pts_adaptive_vec, template_adaptive, pilot_bandwidth = 50, min_bandwidth = 5)
+dens_adaptive <- kde_adaptive(
+  pts_adaptive_vec,
+  template_adaptive,
+  pilot_bandwidth = 50,
+  min_bandwidth = 5
+)
 #> Computing adaptive geodesic KDE: 600 points, 40000 grid cells, 50.0 km pilot bandwidth, 5.0 km min bandwidth
 
 # Visualize comparison
 par(mfrow = c(1, 3))
 plot(dens_fixed, main = "Fixed Bandwidth (50 km)")
 plot(dens_adaptive, main = "Adaptive Bandwidth")
-plot(dens_fixed - dens_adaptive, main = "Difference")
+plot(dens_fixed - dens_adaptive, main = "Difference (Fixed - Adaptive)")
 ```
 
 <img src="man/figures/README-adaptive-1.png" alt="" width="100%" />
 
-For the default `method = "balloon"` and `scaling = "ratio"`, the pilot
-density is computed on the template grid and each cell’s bandwidth is
-`bw_i = min + (pilot - min) / (1 + sqrt(d_i / d_max))`, where `d_i` is
-the pilot density at the cell and `d_max` is the maximum over that grid.
-The same points on a different template can therefore yield different
-balloon bandwidths. With `method = "sample_point"`, pilot density and
-bandwidths are instead evaluated at the input points, independently of
-template extent. Balloon normalization is per cell and does not
-guarantee unit total mass; sample-point kernels are normalized per input
-point and integrate to approximately 1.
+### Normalization and Interpretation
+
+- **Probability Density**: Density values are expressed in probability
+  density per square kilometre (km⁻²).
+- **Balloon Estimator**: Locally normalized per grid cell; suited for
+  visual contrast and hotspot discovery.
+- **Sample-Point Estimator**: Individual kernels are normalized per
+  point and integrate to approximately 1 over the spherical domain.
+
+------------------------------------------------------------------------
 
 ## Bandwidth Selection
 
-Choosing an appropriate bandwidth is critical for kernel density
-estimation. The `bandwidth_optimize()` function uses **leave-one-out
-cross-validation** to select an optimal bandwidth automatically:
+Selecting an appropriate bandwidth is critical in KDE.
+`bandwidth_optimize()` uses **leave-one-out cross-validation (LOOCV)**
+to evaluate candidate bandwidths:
 
 ``` r
-# Select optimal bandwidth via cross-validation
+# Evaluate candidate bandwidths via leave-one-out cross-validation
 bw_cv <- bandwidth_optimize(
   pts_adaptive_vec,
   bandwidth_min = 5,
@@ -233,29 +262,53 @@ bw_cv <- bandwidth_optimize(
 #> 
 #> Optimal bandwidth: 52.2953 km
 
-# Use selected bandwidth for final density estimate
-dens_optimal <- kde_geodesic(pts_adaptive_vec, template_adaptive, bandwidth = bw_cv$bandwidth_opt)
+# Compute density using the optimal bandwidth
+dens_optimal <- kde_geodesic(
+  pts_adaptive_vec,
+  template_adaptive,
+  bandwidth = bw_cv$bandwidth_opt
+)
 #> Computing geodesic KDE: 600 points, 40000 grid cells, 52.3 km bandwidth
-plot(dens_optimal, main = paste("KDE with CV-selected bandwidth:", round(bw_cv$bandwidth_opt, 2), "km"))
+
+plot(
+  dens_optimal,
+  main = paste("KDE with CV-Selected Bandwidth:", round(bw_cv$bandwidth_opt, 2), "km")
+)
 ```
 
 <img src="man/figures/README-bandwidth_optimization-1.png" alt="" width="100%" />
 
-The function evaluates a sequence of candidate bandwidths and computes
-the leave-one-out log-likelihood for each. The bandwidth maximizing
-average log-likelihood is selected. This is statistically principled but
-computationally intensive; for large datasets, consider using fewer
-bandwidth candidates to reduce computation time.
+The bandwidth maximizing average log-likelihood across held-out points
+is selected as `bandwidth_opt`.
 
-**Quick reference:** The two-dimensional normal reference rule provides
-a reasonable starting point: `h = sigma_km * n^(-1/6)`, where `sigma_km`
-is the root-mean-square standard deviation of the point coordinates
-converted to kilometres (not degrees), and `n` is the point count.
-Cross-validation often selects smaller bandwidths than this rule,
-particularly for clustered data.
+**Quick Reference (Normal Reference Rule)**: A fast heuristic for
+two-dimensional point patterns is `h = sigma_km * n^(-1/6)`, where
+`sigma_km` is the root-mean-square standard deviation of point
+coordinates in kilometres and `n` is point count. Cross-validation
+typically selects tighter bandwidths for clustered point data.
+
+------------------------------------------------------------------------
+
+## Performance & Scalability
+
+The Rust computation engine uses a spatial cell hash index with
+latitude-dependent search bounds:
+
+- **Memory Efficient**: Memory consumption scales with the grid cell
+  count of the output raster, not the number of input points.
+- **Parallel Execution**: Grid cells are evaluated in parallel across
+  CPU threads using Rayon.
+- **Sublinear Scaling**: Points outside the kernel cutoff (3 \*
+  bandwidth) are pruned early using spatial indexing.
+
+------------------------------------------------------------------------
 
 ## References
 
-- Haversine formula: <https://en.wikipedia.org/wiki/Haversine_formula>
-- Kernel density estimation:
-  <https://en.wikipedia.org/wiki/Kernel_density_estimation>
+- **Haversine Formula**: Sinnott, R. W. (1984). Virtues of the
+  Haversine. *Sky and Telescope*, 68(2), 159.
+- **Kernel Density Estimation**: Silverman, B. W. (1986). *Density
+  Estimation for Statistics and Data Analysis*. Chapman and Hall,
+  London.
+- **terra**: Hijmans, R. J. (2024). *terra: Spatial Data Analysis*. R
+  package.
