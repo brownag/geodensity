@@ -24,7 +24,14 @@ help:
 # Regenerate vendor.tar.xz from Cargo.lock (kept out of git but needed for distribution)
 vendor:
 	@echo "Regenerating vendored Rust dependencies..."
-	@Rscript -e "rextendr::vendor_crates(path='src/rust')" 2>&1 | grep -v "^Crate collection" || true
+	@output=$$(mktemp); \
+	if Rscript -e "if (!requireNamespace('rextendr', quietly=TRUE) || utils::packageVersion('rextendr') < '0.5.0') stop('make vendor requires rextendr >= 0.5.0'); rextendr::vendor_crates(path='src/rust')" >$$output 2>&1; then \
+		grep -v "^Crate collection" $$output || true; \
+		rm -f $$output; \
+	else \
+		status=$$?; grep -v "^Crate collection" $$output || true; \
+		rm -f $$output; exit $$status; \
+	fi
 	@if [ -f "src/rust/vendor.tar.xz" ]; then \
 		echo "[OK] vendor.tar.xz created successfully"; \
 	else \
@@ -115,4 +122,3 @@ all: build docs test
 	@echo "=========================================="
 	@echo "Build, documentation, and tests complete!"
 	@echo "=========================================="
-
