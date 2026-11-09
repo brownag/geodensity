@@ -10,3 +10,4 @@ Makefile
 ^README\.knit\.md$
 ^\.github$
 ^planning$
+^AGENTS\.md$
