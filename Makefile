@@ -74,7 +74,7 @@ docs:
 # Render README.Rmd to README.md and README.html
 readme:
 	@echo "Rendering README.Rmd..."
-	@Rscript -e "rmarkdown::render('README.Rmd', output_format='all', quiet=TRUE); cat('README rendered to README.md and README.html\n')"
+	@Rscript -e "devtools::load_all(quiet=TRUE); rmarkdown::render('README.Rmd', output_format='all', quiet=TRUE); cat('README rendered to README.md and README.html\n')"
 
 # Full R CMD check
 check: vendor docs
