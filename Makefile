@@ -24,7 +24,7 @@ help:
 # Regenerate vendor.tar.xz from Cargo.lock (kept out of git but needed for distribution)
 vendor:
 	@echo "Regenerating vendored Rust dependencies..."
-	@Rscript -e "rextendr::vendor_pkgs(path='src/rust')" 2>&1 | grep -v "^Crate collection" || true
+	@Rscript -e "rextendr::vendor_crates(path='src/rust')" 2>&1 | grep -v "^Crate collection" || true
 	@if [ -f "src/rust/vendor.tar.xz" ]; then \
 		echo "[OK] vendor.tar.xz created successfully"; \
 	else \
