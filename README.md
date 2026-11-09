@@ -227,8 +227,10 @@ plot(dens_fixed - dens_adaptive, main = "Difference (Fixed - Adaptive)")
   visual contrast and hotspot discovery.
 - **Sample-Point Estimator**: Each point’s kernel is normalized per
   point and integrates to approximately 1/n over the spherical domain,
-  so the sum over all points integrates to approximately 1 (under planar
-  normalization).
+  so the sum over all points integrates to approximately 1. This holds
+  only when bandwidths are small relative to Earth’s radius; planar
+  normalization does not guarantee unit mass on the sphere for large
+  bandwidths (for example, about 0.18 at 20,000 km).
 
 ------------------------------------------------------------------------
 
