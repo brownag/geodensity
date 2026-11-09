@@ -243,7 +243,9 @@ to evaluate candidate bandwidths:
 > **Cost warning**: `bandwidth_optimize()` evaluates pairwise point
 > distances serially for each candidate bandwidth. This can be
 > prohibitively expensive on large datasets; consider subsampling points
-> or narrowing the bandwidth range first.
+> or reducing `n_bandwidths` first. Narrowing the bandwidth range does
+> not reduce the work, since every point pair is still evaluated for
+> each candidate.
 
 ``` r
 # Evaluate candidate bandwidths via leave-one-out cross-validation
