@@ -27,7 +27,7 @@ Fast kernel density estimation on geographic grids using geodesic (great-circle)
 
 Traditional kernel density estimation (KDE) relies on Euclidean planar distance, which causes severe geometric distortion for geographic coordinates on a sphere and fails at boundaries like the international dateline.
 
-The **`geodensity`** package computes kernel density estimates directly on geographic coordinates (longitude/latitude) using great-circle geodesic distances via the **Haversine formula**. The computationally intensive steps are implemented in a high-performance Rust backend using **Rayon** for multi-core parallelization, scaling effortlessly to millions of point locations.
+The **`geodensity`** package computes kernel density estimates directly on geographic coordinates (longitude/latitude) using great-circle geodesic distances via the **Haversine formula**. The KDE estimators are implemented in a high-performance Rust backend using **Rayon** for multi-core parallelization, scaling to millions of point locations. Bandwidth selection is not parallelized and is much more expensive (see [Bandwidth Selection](#bandwidth-selection)).
 
 ### Key Features
 
@@ -198,6 +198,8 @@ plot(dens_fixed - dens_adaptive, main = "Difference (Fixed - Adaptive)")
 ## Bandwidth Selection
 
 Selecting an appropriate bandwidth is critical in KDE. `bandwidth_optimize()` uses **leave-one-out cross-validation (LOOCV)** to evaluate candidate bandwidths:
+
+> **Cost warning**: `bandwidth_optimize()` evaluates pairwise point distances serially for each candidate bandwidth. This can be prohibitively expensive on large datasets; consider subsampling points or narrowing the bandwidth range first.
 
 ```{r bandwidth_optimization}
 # Evaluate candidate bandwidths via leave-one-out cross-validation
