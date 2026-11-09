@@ -69,18 +69,65 @@ fn build_spatial_index(
     grid_index
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum AdaptiveMethod {
+    Balloon,
+    SamplePoint,
+}
+
+impl AdaptiveMethod {
+    fn parse(s: &str) -> Self {
+        match s {
+            "balloon" => AdaptiveMethod::Balloon,
+            "sample_point" => AdaptiveMethod::SamplePoint,
+            other => panic!(
+                "Invalid adaptive method: '{}'. Expected 'balloon' or 'sample_point'",
+                other
+            ),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ScalingMode {
+    Ratio,
+    LinearSqrt,
+}
+
+impl ScalingMode {
+    fn parse(s: &str) -> Self {
+        match s {
+            "ratio" => ScalingMode::Ratio,
+            "linear_sqrt" => ScalingMode::LinearSqrt,
+            other => panic!(
+                "Invalid scaling mode: '{}'. Expected 'ratio' or 'linear_sqrt'",
+                other
+            ),
+        }
+    }
+}
+
+#[inline]
+fn gaussian_kernel(dist_km: f64, bandwidth_km: f64) -> f64 {
+    if dist_km < 3.0 * bandwidth_km {
+        (-0.5 * (dist_km / bandwidth_km).powi(2)).exp()
+    } else {
+        0.0
+    }
+}
+
 fn visit_candidate_points<F: FnMut(usize)>(
     gx: f64,
     gy: f64,
     cutoff_km: f64,
-    data_points: &[Point<f64>],
+    n_points: usize,
     grid_index: &std::collections::HashMap<(i32, i32), Vec<usize>>,
     index_cell_size: f64,
     mut visit: F,
 ) {
     let (hw_lon, hw_lat) = search_half_widths_deg(cutoff_km, gy);
     if hw_lon >= 90.0 {
-        for idx in 0..data_points.len() {
+        for idx in 0..n_points {
             visit(idx);
         }
     } else {
@@ -102,6 +149,36 @@ fn visit_candidate_points<F: FnMut(usize)>(
     }
 }
 
+fn accumulate_grid_point_kernel<F>(
+    grid_point: Point<f64>,
+    data_points: &[Point<f64>],
+    grid_index: &std::collections::HashMap<(i32, i32), Vec<usize>>,
+    index_cell_size: f64,
+    cutoff_km: f64,
+    mut eval_point: F,
+) -> f64
+where
+    F: FnMut(usize, f64) -> f64,
+{
+    let mut sum = 0.0;
+    let mut visit = |idx: usize| {
+        let point = &data_points[idx];
+        let dist_meters = point.haversine_distance(&grid_point);
+        let dist_km = dist_meters / 1000.0;
+        sum += eval_point(idx, dist_km);
+    };
+
+    visit_candidate_points(
+        grid_point.x(),
+        grid_point.y(),
+        cutoff_km,
+        data_points.len(),
+        grid_index,
+        index_cell_size,
+        &mut visit,
+    );
+    sum
+}
 
 /// Geodesic kernel density estimate on a grid, with grid-based spatial indexing.
 /// The grid points are computed in parallel with Rayon.
@@ -128,48 +205,32 @@ fn geodesic_kde_rust(
 
     // 3. Build spatial grid index with dynamic cell size
     let grid_index = build_spatial_index(&data_points, index_cell_size);
+    let norm = 2.0 * std::f64::consts::PI * bandwidth_km * bandwidth_km * data_points.len() as f64;
 
-    // 5. Parallel iteration over the output grid (pixels)
-    let densities: Vec<f64> = grid_x
+    // 4. Parallel iteration over the output grid (pixels)
+    grid_x
         .par_iter()
         .zip(grid_y.par_iter())
         .map(|(&gx, &gy)| {
             let grid_point = Point::new(gx, gy);
-            let mut sum = 0.0;
-            let mut visit = |idx: usize| {
-                let point = &data_points[idx];
-                let dist_meters = point.haversine_distance(&grid_point);
-                let dist_km = dist_meters / 1000.0;
-                // Gaussian kernel with 3-sigma cutoff for efficiency
-                if dist_km < (bandwidth_km * 3.0) {
-                    let exponent = -0.5 * (dist_km / bandwidth_km).powi(2);
-                    sum += exponent.exp();
-                }
-            };
-
-            visit_candidate_points(
-                gx,
-                gy,
-                cutoff_km,
+            let sum = accumulate_grid_point_kernel(
+                grid_point,
                 &data_points,
                 &grid_index,
                 index_cell_size,
-                &mut visit,
+                cutoff_km,
+                |_idx, dist_km| gaussian_kernel(dist_km, bandwidth_km),
             );
-            sum
+            sum / norm
         })
-        .collect();
-
-    // Normalize to probability density: divide by 2*pi*bw^2*n (after accumulation)
-    let norm = 2.0 * std::f64::consts::PI * bandwidth_km * bandwidth_km * x_coords.len() as f64;
-    densities.iter().map(|&d| d / norm).collect()
+        .collect()
 }
 
 fn compute_adaptive_scales(
     pilot_density: &[f64],
     pilot_bw: f64,
     min_bw: f64,
-    scaling: &str,
+    scaling: ScalingMode,
 ) -> Vec<f64> {
     let reference_density = pilot_density.iter().copied().fold(0.0, f64::max);
     pilot_density
@@ -181,8 +242,8 @@ fn compute_adaptive_scales(
                 0.0
             };
             let scale_factor = match scaling {
-                "linear_sqrt" => 1.0 - density_ratio.sqrt(),
-                _ => 1.0 / (1.0 + density_ratio.sqrt()),
+                ScalingMode::LinearSqrt => 1.0 - density_ratio.sqrt(),
+                ScalingMode::Ratio => 1.0 / (1.0 + density_ratio.sqrt()),
             };
             min_bw + (pilot_bw - min_bw) * scale_factor
         })
@@ -202,11 +263,12 @@ fn geodesic_kde_adaptive_rust(
     method: &str,
     scaling: &str,
 ) -> Vec<f64> {
-    let sample_point = method == "sample_point";
-    let (pilot_x, pilot_y) = if sample_point {
-        (x_coords.clone(), y_coords.clone())
-    } else {
-        (grid_x.clone(), grid_y.clone())
+    let method_mode = AdaptiveMethod::parse(method);
+    let scaling_mode = ScalingMode::parse(scaling);
+
+    let (pilot_x, pilot_y) = match method_mode {
+        AdaptiveMethod::SamplePoint => (x_coords.clone(), y_coords.clone()),
+        AdaptiveMethod::Balloon => (grid_x.clone(), grid_y.clone()),
     };
     let pilot_density = geodesic_kde_rust(
         x_coords.clone(),
@@ -219,7 +281,7 @@ fn geodesic_kde_adaptive_rust(
         &pilot_density,
         pilot_bandwidth_km,
         min_bandwidth_km,
-        scaling,
+        scaling_mode,
     );
     let data_points: Vec<_> = x_coords
         .iter()
@@ -230,11 +292,16 @@ fn geodesic_kde_adaptive_rust(
     let cutoff_km = 3.0 * pilot_bandwidth_km;
     let index_cell_size = index_cell_size(&grid_y, cutoff_km);
     let grid_index = build_spatial_index(&data_points, index_cell_size);
-    let point_norms: Vec<f64> = scales
-        .iter()
-        .map(|&bw| 1.0 / (2.0 * std::f64::consts::PI * bw * bw * x_coords.len() as f64))
-        .collect();
 
+    let point_norms: Option<Vec<f64>> = match method_mode {
+        AdaptiveMethod::SamplePoint => Some(
+            scales
+                .iter()
+                .map(|&bw| 1.0 / (2.0 * std::f64::consts::PI * bw * bw * data_points.len() as f64))
+                .collect(),
+        ),
+        AdaptiveMethod::Balloon => None,
+    };
 
     let densities: Vec<f64> = grid_x
         .par_iter()
@@ -242,37 +309,31 @@ fn geodesic_kde_adaptive_rust(
         .enumerate()
         .map(|(cell_idx, (&gx, &gy))| {
             let grid_point = geo::Point::new(gx, gy);
-            let mut sum = 0.0;
-            let mut visit = |idx: usize| {
-                let point = &data_points[idx];
-                let dist_meters = point.haversine_distance(&grid_point);
-                let dist_km = dist_meters / 1000.0;
-                let scale_idx = if sample_point { idx } else { cell_idx };
-                let bandwidth_km = scales[scale_idx];
-                if dist_km < 3.0 * bandwidth_km {
-                    let kernel = (-0.5 * (dist_km / bandwidth_km).powi(2)).exp();
-                    if sample_point {
-                        sum += kernel * point_norms[idx];
-                    } else {
-                        sum += kernel;
-                    }
-                }
-            };
-
-            visit_candidate_points(
-                gx,
-                gy,
-                cutoff_km,
+            let sum = accumulate_grid_point_kernel(
+                grid_point,
                 &data_points,
                 &grid_index,
                 index_cell_size,
-                &mut visit,
+                cutoff_km,
+                |idx, dist_km| {
+                    let bw = match method_mode {
+                        AdaptiveMethod::SamplePoint => scales[idx],
+                        AdaptiveMethod::Balloon => scales[cell_idx],
+                    };
+                    let k = gaussian_kernel(dist_km, bw);
+                    if let Some(ref norms) = point_norms {
+                        k * norms[idx]
+                    } else {
+                        k
+                    }
+                },
             );
-            if sample_point {
-                sum
-            } else {
-                sum / (2.0 * std::f64::consts::PI * scales[cell_idx].powi(2)
-                    * x_coords.len() as f64)
+            match method_mode {
+                AdaptiveMethod::SamplePoint => sum,
+                AdaptiveMethod::Balloon => {
+                    sum / (2.0 * std::f64::consts::PI * scales[cell_idx].powi(2)
+                        * data_points.len() as f64)
+                }
             }
         })
         .collect();
