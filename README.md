@@ -309,8 +309,6 @@ latitude-dependent search bounds:
   candidate bandwidths.
 - **Parallel Execution**: Grid cells are evaluated in parallel across
   CPU threads using Rayon.
-- **Sublinear Scaling**: Points outside the kernel cutoff (3 \*
-  bandwidth) are pruned early using spatial indexing.
 
 ------------------------------------------------------------------------
 
