@@ -24,10 +24,11 @@ dateline.
 
 The **`geodensity`** package computes kernel density estimates directly
 on geographic coordinates (longitude/latitude) using great-circle
-geodesic distances via the **Haversine formula**. The computationally
-intensive steps are implemented in a high-performance Rust backend using
-**Rayon** for multi-core parallelization, scaling effortlessly to
-millions of point locations.
+geodesic distances via the **Haversine formula**. The KDE estimators are
+implemented in a high-performance Rust backend using **Rayon** for
+multi-core parallelization, scaling to millions of point locations.
+Bandwidth selection is not parallelized and is much more expensive (see
+[Bandwidth Selection](#bandwidth-selection)).
 
 ### Key Features
 
@@ -76,7 +77,7 @@ Building from source requires:
 
 > **Note**: Input points and raster templates must be in a **Geographic
 > CRS** (unprojected longitude/latitude, such as `EPSG:4326` or
-> `OGC:CRS84`).
+> `OGC:CRS84`), and both must use the **same CRS**.
 
 ------------------------------------------------------------------------
 
@@ -224,8 +225,10 @@ plot(dens_fixed - dens_adaptive, main = "Difference (Fixed - Adaptive)")
   density per square kilometre (km⁻²).
 - **Balloon Estimator**: Locally normalized per grid cell; suited for
   visual contrast and hotspot discovery.
-- **Sample-Point Estimator**: Individual kernels are normalized per
-  point and integrate to approximately 1 over the spherical domain.
+- **Sample-Point Estimator**: Each point’s kernel is normalized per
+  point and integrates to approximately 1/n over the spherical domain,
+  so the sum over all points integrates to approximately 1 (under planar
+  normalization).
 
 ------------------------------------------------------------------------
 
@@ -234,6 +237,11 @@ plot(dens_fixed - dens_adaptive, main = "Difference (Fixed - Adaptive)")
 Selecting an appropriate bandwidth is critical in KDE.
 `bandwidth_optimize()` uses **leave-one-out cross-validation (LOOCV)**
 to evaluate candidate bandwidths:
+
+> **Cost warning**: `bandwidth_optimize()` evaluates pairwise point
+> distances serially for each candidate bandwidth. This can be
+> prohibitively expensive on large datasets; consider subsampling points
+> or narrowing the bandwidth range first.
 
 ``` r
 # Evaluate candidate bandwidths via leave-one-out cross-validation
@@ -294,8 +302,11 @@ typically selects tighter bandwidths for clustered point data.
 The Rust computation engine uses a spatial cell hash index with
 latitude-dependent search bounds:
 
-- **Memory Efficient**: Memory consumption scales with the grid cell
-  count of the output raster, not the number of input points.
+- **Memory**: Memory grows with both the number of input points (spatial
+  index and per-point normalization) and the number of output grid
+  cells. `bandwidth_optimize()` also allocates a density array
+  proportional to the number of points multiplied by the number of
+  candidate bandwidths.
 - **Parallel Execution**: Grid cells are evaluated in parallel across
   CPU threads using Rayon.
 - **Sublinear Scaling**: Points outside the kernel cutoff (3 \*
