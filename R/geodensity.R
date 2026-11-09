@@ -1,4 +1,13 @@
-# Internal input validation helper
+#' Validate and extract coordinates from KDE inputs
+#'
+#' Validates that input points and template raster (if provided) are in a
+#' geographic coordinate reference system (lon/lat), checks that their CRSs
+#' match, and extracts coordinates as a two-column numeric matrix.
+#'
+#' @param x A `SpatVector` or `sf` object containing point geometries.
+#' @param r An optional `SpatRaster` template defining the output grid.
+#' @return A two-column numeric matrix of coordinates (lon, lat).
+#' @noRd
 validate_kde_inputs <- function(x, r = NULL) {
   if (inherits(x, "sf")) {
     x <- terra::vect(x)

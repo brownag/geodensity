@@ -1,4 +1,4 @@
-.PHONY: help build test install clean docs dev-setup check lint format vendor all readme
+.PHONY: help build test install clean docs dev-setup check lint clippy format vendor all readme
 
 # Default target
 help:
@@ -13,7 +13,8 @@ help:
 	@echo "  make docs        - Generate roxygen2 documentation"
 	@echo "  make readme      - Render README.Rmd to README.md and README.html"
 	@echo "  make check       - Run R CMD check (full validation)"
-	@echo "  make lint        - Check for code issues"
+	@echo "  make lint        - Check for code issues (R + Rust)"
+	@echo "  make clippy      - Run cargo clippy on Rust backend"
 	@echo "  make format      - Auto-format code"
 	@echo "  make clean       - Clean build artifacts"
 	@echo "  make distclean   - Deep clean (removes compiled objects)"
@@ -80,9 +81,15 @@ check: vendor docs
 	@echo "Running R CMD check..."
 	@Rscript -e "devtools::check()"
 
-# Lint code for issues
-lint:
-	@echo "Checking for code issues..."
+# Run Clippy on Rust backend
+clippy:
+	@echo "Running cargo clippy..."
+	@cargo clippy --manifest-path src/rust/Cargo.toml --all-targets -- -D warnings
+	@echo "Clippy check complete!"
+
+# Lint code for issues (R + Rust)
+lint: clippy
+	@echo "Checking for code issues in R..."
 	@Rscript -e "lintr::lint_dir('R/')" || true
 	@echo "Lint check complete!"
 

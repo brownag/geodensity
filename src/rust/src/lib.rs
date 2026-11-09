@@ -35,9 +35,7 @@ fn index_cell_size(grid_y: &[f64], cutoff_km: f64) -> f64 {
         .map(|&gy| search_half_widths_deg(cutoff_km, gy).0)
         .filter(|&hw| hw < 90.0)
         .fold(search_half_widths_deg(cutoff_km, 0.0).1, f64::max);
-    (max_half_width_deg * 1.5)
-        .max(0.1)
-        .min(45.0)
+    (max_half_width_deg * 1.5).clamp(0.1, 45.0)
 }
 
 /// Grid-cell index of the points with dateline-aware keys: each point is stored under its
@@ -53,29 +51,36 @@ fn build_spatial_index(
         let x_key = (point.x() / cell_size).floor() as i32;
         let y_key = (point.y() / cell_size).floor() as i32;
 
-        grid_index.entry((x_key, y_key)).or_insert_with(Vec::new).push(idx);
+        grid_index.entry((x_key, y_key)).or_default().push(idx);
 
         // Wrap positive values near +180 to negative equivalent, and vice versa
         if point.x() > 90.0 {
             let wrapped_x = point.x() - 360.0;
             let wrapped_key = (wrapped_x / cell_size).floor() as i32;
-            grid_index.entry((wrapped_key, y_key)).or_insert_with(Vec::new).push(idx);
+            grid_index.entry((wrapped_key, y_key)).or_default().push(idx);
         } else if point.x() < -90.0 {
             let wrapped_x = point.x() + 360.0;
             let wrapped_key = (wrapped_x / cell_size).floor() as i32;
-            grid_index.entry((wrapped_key, y_key)).or_insert_with(Vec::new).push(idx);
+            grid_index.entry((wrapped_key, y_key)).or_default().push(idx);
         }
     }
     grid_index
 }
 
+/// Evaluation method for adaptive KDE.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum AdaptiveMethod {
+    /// Balloon estimator: bandwidth varies per evaluation grid cell based on pilot density.
     Balloon,
+    /// Sample-point estimator: bandwidth varies per input observation point.
     SamplePoint,
 }
 
 impl AdaptiveMethod {
+    /// Parses an adaptive method name from an FFI string slice.
+    ///
+    /// # Panics
+    /// Panics if the string does not match "balloon" or "sample_point".
     fn parse(s: &str) -> Self {
         match s {
             "balloon" => AdaptiveMethod::Balloon,
@@ -88,13 +93,20 @@ impl AdaptiveMethod {
     }
 }
 
+/// Scaling mode relating pilot density to local bandwidth in adaptive KDE.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum ScalingMode {
+    /// Ratio scaling: `bw = min + (pilot - min) / (1 + sqrt(d / d_max))`.
     Ratio,
+    /// Linear square-root scaling: `bw = min + (pilot - min) * (1 - sqrt(d / d_max))`.
     LinearSqrt,
 }
 
 impl ScalingMode {
+    /// Parses a scaling mode from an FFI string slice.
+    ///
+    /// # Panics
+    /// Panics if the string does not match "ratio" or "linear_sqrt".
     fn parse(s: &str) -> Self {
         match s {
             "ratio" => ScalingMode::Ratio,
@@ -107,6 +119,10 @@ impl ScalingMode {
     }
 }
 
+/// Evaluates the unnormalized Gaussian kernel with a 3-sigma cutoff.
+///
+/// Computes `exp(-0.5 * (dist_km / bandwidth_km)^2)` when `dist_km < 3.0 * bandwidth_km`,
+/// and returns `0.0` otherwise for computational efficiency.
 #[inline]
 fn gaussian_kernel(dist_km: f64, bandwidth_km: f64) -> f64 {
     if dist_km < 3.0 * bandwidth_km {
@@ -116,6 +132,12 @@ fn gaussian_kernel(dist_km: f64, bandwidth_km: f64) -> f64 {
     }
 }
 
+/// Discovers and visits spatial index candidate point indices within search bounds.
+///
+/// For polar or large-cutoff cases (`hw_lon >= 90.0`), visits all `n_points` indices.
+/// Otherwise, queries spatial grid cells overlapping the latitude/longitude half-width
+/// bounding box around `(gx, gy)`, wrapping longitudes across [-180, 180) as needed,
+/// and invokes `visit` on each candidate point index.
 fn visit_candidate_points<F: FnMut(usize)>(
     gx: f64,
     gy: f64,
@@ -149,6 +171,11 @@ fn visit_candidate_points<F: FnMut(usize)>(
     }
 }
 
+/// Accumulates kernel contributions for a single evaluation grid point.
+///
+/// Queries candidate data points via [`visit_candidate_points`], calculates
+/// great-circle haversine distance in kilometers from `grid_point`, and sums
+/// the contributions returned by `eval_point(idx, dist_km)`.
 fn accumulate_grid_point_kernel<F>(
     grid_point: Point<f64>,
     data_points: &[Point<f64>],
@@ -226,6 +253,11 @@ fn geodesic_kde_rust(
         .collect()
 }
 
+/// Computes local bandwidth scales from pilot density estimates.
+///
+/// Finds the maximum pilot density as the reference, computes relative density
+/// ratios `d / reference_density`, and scales the bandwidth between `min_bw` and
+/// `pilot_bw` according to `scaling`.
 fn compute_adaptive_scales(
     pilot_density: &[f64],
     pilot_bw: f64,
@@ -253,6 +285,7 @@ fn compute_adaptive_scales(
 /// Adaptive geodesic KDE: method is "balloon" or "sample_point"; scaling is
 /// "ratio" or "linear_sqrt".
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn geodesic_kde_adaptive_rust(
     x_coords: Vec<f64>,
     y_coords: Vec<f64>,
