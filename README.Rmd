@@ -65,7 +65,7 @@ Building from source requires:
 | [`kde_adaptive()`](#adaptive-bandwidth) | Adaptive-bandwidth geodesic KDE | Points (`x`), Template raster (`r`), `pilot_bandwidth`, `min_bandwidth` |
 | [`bandwidth_optimize()`](#bandwidth-selection) | Leave-one-out cross-validation (LOOCV) | Points (`x`), `bandwidth_min`, `bandwidth_max`, `n_bandwidths` |
 
-> **Note**: Input points and raster templates must be in a **Geographic CRS** (unprojected longitude/latitude, such as `EPSG:4326` or `OGC:CRS84`).
+> **Note**: Input points and raster templates must be in a **Geographic CRS** (unprojected longitude/latitude, such as `EPSG:4326` or `OGC:CRS84`), and both must use the **same CRS**.
 
 ---
 
