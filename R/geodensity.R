@@ -1,3 +1,47 @@
+# Internal input validation helper
+validate_kde_inputs <- function(x, r = NULL) {
+  if (inherits(x, "sf")) {
+    x <- terra::vect(x)
+  }
+
+  if (!inherits(x, "SpatVector")) {
+    stop("x must be a SpatVector or sf object")
+  }
+
+  if (!suppressWarnings(terra::is.lonlat(x))) {
+    stop(
+      "Input points must be in Geographic CRS (latitude/longitude). ",
+      "Current CRS: ", terra::crs(x), ". ",
+      "Reproject using terra::project() if needed."
+    )
+  }
+
+  if (!is.null(r)) {
+    if (!inherits(r, "SpatRaster")) {
+      stop("r must be a SpatRaster")
+    }
+
+    if (!suppressWarnings(terra::is.lonlat(r))) {
+      stop(
+        "Template raster must be in Geographic CRS (latitude/longitude). ",
+        "Current CRS: ", terra::crs(r), ". ",
+        "Reproject using terra::project() if needed."
+      )
+    }
+
+    if (!terra::same.crs(x, r)) {
+      stop("Input points and template raster must use the same CRS")
+    }
+  }
+
+  pts <- terra::crds(x)
+  if (nrow(pts) == 0) {
+    stop("Input vector contains no points")
+  }
+
+  pts
+}
+
 #' Calculate Geodesic Kernel Density Estimate
 #'
 #' Computes kernel density estimates on a geographic grid using geodesic (great-circle)
@@ -73,47 +117,11 @@
 #' @export
 kde_geodesic <- function(x, r, bandwidth) {
   # 1. Validation and Data Extraction
-  if (inherits(x, "sf")) {
-    x <- terra::vect(x)
-  }
-
-  if (!inherits(x, "SpatVector")) {
-    stop("x must be a SpatVector or sf object")
-  }
-
-  if (!inherits(r, "SpatRaster")) {
-    stop("r must be a SpatRaster")
-  }
-
   if (!is.numeric(bandwidth) || length(bandwidth) != 1 || bandwidth <= 0) {
     stop("bandwidth must be a positive numeric scalar (in kilometers)")
   }
 
-  # Check that input is in geographic (lon/lat) coordinates
-  # Suppress warnings from is.lonlat when checking projected CRS
-  if (!suppressWarnings(terra::is.lonlat(x))) {
-    stop(
-      "Input points must be in Geographic CRS (latitude/longitude). ",
-      "Current CRS: ", terra::crs(x), ". ",
-      "Reproject using terra::project() if needed."
-    )
-  }
-
-  # Check that template raster is also in geographic coordinates
-  if (!suppressWarnings(terra::is.lonlat(r))) {
-    stop(
-      "Template raster must be in Geographic CRS (latitude/longitude). ",
-      "Current CRS: ", terra::crs(r), ". ",
-      "Reproject using terra::project() if needed."
-    )
-  }
-
-  # Extract coordinates from the SpatVector
-  pts <- terra::crds(x)
-
-  if (nrow(pts) == 0) {
-    stop("Input vector contains no points")
-  }
+  pts <- validate_kde_inputs(x, r)
 
   message(
     sprintf(
@@ -270,18 +278,6 @@ kde_adaptive <- function(
   scaling = c("ratio", "linear_sqrt")
 ) {
   # 1. Validation and Data Extraction
-  if (inherits(x, "sf")) {
-    x <- terra::vect(x)
-  }
-
-  if (!inherits(x, "SpatVector")) {
-    stop("x must be a SpatVector or sf object")
-  }
-
-  if (!inherits(r, "SpatRaster")) {
-    stop("r must be a SpatRaster")
-  }
-
   if (!is.numeric(pilot_bandwidth) || length(pilot_bandwidth) != 1 || pilot_bandwidth <= 0) {
     stop("pilot_bandwidth must be a positive numeric scalar (in kilometers)")
   }
@@ -302,34 +298,7 @@ kde_adaptive <- function(
   method <- match.arg(method)
   scaling <- match.arg(scaling)
 
-  # Check that input is in geographic (lon/lat) coordinates
-  if (!suppressWarnings(terra::is.lonlat(x))) {
-    stop(
-      "Input points must be in Geographic CRS (latitude/longitude). ",
-      "Current CRS: ", terra::crs(x), ". ",
-      "Reproject using terra::project() if needed."
-    )
-  }
-
-  # Check that template raster is also in geographic coordinates
-  if (!suppressWarnings(terra::is.lonlat(r))) {
-    stop(
-      "Template raster must be in Geographic CRS (latitude/longitude). ",
-      "Current CRS: ", terra::crs(r), ". ",
-      "Reproject using terra::project() if needed."
-    )
-  }
-
-  if (!terra::same.crs(x, r)) {
-    stop("Input points and template raster must use the same CRS")
-  }
-
-  # Extract coordinates from the SpatVector
-  pts <- terra::crds(x)
-
-  if (nrow(pts) == 0) {
-    stop("Input vector contains no points")
-  }
+  pts <- validate_kde_inputs(x, r)
 
   message(
     sprintf(
@@ -476,26 +445,7 @@ bandwidth_optimize <- function(
     verbose = TRUE
 ) {
   # Validation
-  if (inherits(x, "sf")) {
-    x <- terra::vect(x)
-  }
-
-  if (!inherits(x, "SpatVector")) {
-    stop("x must be a SpatVector or sf object")
-  }
-
-  if (!suppressWarnings(terra::is.lonlat(x))) {
-    stop(
-      "Input points must be in Geographic CRS (latitude/longitude). ",
-      "Current CRS: ", terra::crs(x), ". ",
-      "Reproject using terra::project() if needed."
-    )
-  }
-
-  pts <- terra::crds(x)
-  if (nrow(pts) == 0) {
-    stop("Input vector contains no points")
-  }
+  pts <- validate_kde_inputs(x)
 
   if (nrow(pts) < 3) {
     warning("Bandwidth selection with < 3 points is unreliable; consider using Silverman's rule")
