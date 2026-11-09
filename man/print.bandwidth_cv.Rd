@@ -11,6 +11,9 @@
 
 \item{...}{Additional arguments (unused)}
 }
+\value{
+The input object, invisibly.
+}
 \description{
 Print bandwidth_cv object
 }

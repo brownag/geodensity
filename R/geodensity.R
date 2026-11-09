@@ -563,6 +563,7 @@ bandwidth_optimize <- function(
 #'
 #' @param x A `bandwidth_cv` object from `bandwidth_optimize()`
 #' @param ... Additional arguments (unused)
+#' @return The input object, invisibly.
 #' @export
 print.bandwidth_cv <- function(x, ...) {
   cat("Bandwidth Cross-Validation Results\n")
@@ -581,4 +582,5 @@ print.bandwidth_cv <- function(x, ...) {
     idx <- top_idx[i]
     cat(sprintf("  %d. %.4f km (LL = %.4f)\n", i, x$bandwidths[idx], x$log_likelihood[idx]))
   }
+  invisible(x)
 }
