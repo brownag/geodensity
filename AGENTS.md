@@ -1,0 +1,123 @@
+# AGENTS.md - geodensity
+
+Geodesic Kernel Density Estimation for Spatial Data in R with a high-performance Rust backend.
+
+## Quick Start
+
+```bash
+# Build package (cargo release compile + load)
+make build
+
+# Run all unit tests (tinytest)
+make test
+
+# Run a specific test file
+make test TEST_FILE=inst/tinytest/test_geodensity.R
+
+# Generate roxygen2 documentation
+make docs
+
+# Run Clippy on Rust backend
+make clippy
+
+# Lint R and Rust code
+make lint
+
+# Auto-format R code
+make format
+
+# Regenerate vendored Rust crates
+make vendor
+
+# Full R CMD check (vendor + docs + check)
+make check
+
+# Render README.Rmd to README.md and README.html
+make readme
+
+# Clean build artifacts
+make clean
+```
+
+## Find Things
+
+### Directory Map
+* `R/` -- R package source code
+  * `R/geodensity.R` -- Main user-facing functions (`kde_geodesic()`, `kde_adaptive()`, `bandwidth_optimize()`, `print.bandwidth_cv()`) and input validation (`validate_kde_inputs()`)
+  * `R/extendr-wrappers.R` -- **Auto-generated** C FFI / extendr wrapper bindings (do not edit manually)
+* `src/` -- Native C and Rust bridge
+  * `src/entrypoint.c` -- R C registration bridge
+  * `src/Makevars`, `src/Makevars.in`, `src/Makevars.win.in` -- Build flags and compile rules linking the Rust staticlib
+  * `src/rust/` -- Rust crate root
+    * `src/rust/Cargo.toml` -- Rust dependencies (`extendr-api`, `rayon`, `geo`)
+    * `src/rust/src/lib.rs` -- Spatial indexing, geodesic distance calculation, Gaussian kernels, adaptive estimation, LOO-CV, and extendr export functions
+    * `src/rust/vendor.tar.xz` -- Vendored crates archive required for CRAN/offline builds
+* `inst/` -- Installed package files
+  * `inst/tinytest/` -- Test suite files (`test_geodensity.R`)
+* `tests/` -- Package test entry point (`tinytest.R`)
+* `man/` -- **Auto-generated** Rd documentation (regenerated via `make docs`)
+* `demo/` -- Demonstration scripts (`urban_incidents.R`)
+* `tools/` -- Configuration and compiler version scripts (`config.R`, `msrv.R`)
+* `planning/` -- Historical wave orchestration artifacts and task plans
+
+### Architecture
+* **Interface**: High-level R package wrapping terra `SpatRaster` and `SpatVector` / `sf` objects.
+* **Engine**: Rust static library compiled via `cargo` using `extendr-api` (0.9.0), parallelized across cores using `rayon`, using great-circle / geodesic formulas from `geo`.
+* **Data Flow**: Spatial coordinates are validated in R (`validate_kde_inputs()`), passed across C FFI to Rust as coordinate vectors, evaluated in parallel over grid points using a spatial cell index with dateline wrapping, and returned as numeric vectors reshaped into `SpatRaster`.
+
+## Workflows
+
+### Modifying R Code
+1. Edit functions in `R/geodensity.R`.
+2. Update roxygen comments if argument or return types change.
+3. Run `make docs` to re-roxygenize `man/`.
+4. Run `make test` to verify expectations.
+5. Format with `make format`.
+
+### Modifying Rust Backend
+1. Edit logic in `src/rust/src/lib.rs`.
+2. If adding or altering `#[extendr]` exported functions:
+   * Regenerate wrappers: `Rscript -e "rextendr::document()"`
+3. If changing dependencies in `src/rust/Cargo.toml`:
+   * Regenerate vendored bundle: `make vendor`
+4. Run Rust checks: `make clippy`.
+5. Recompile and test: `make build && make test`.
+
+### Documentation & Packaging
+* Rebuild roxygen documentation: `make docs`.
+* Render vignettes or README: `make readme`.
+* Verify package completeness and CRAN compliance: `make check`.
+
+## Infrastructure
+
+* **Language Runtimes**: R (>= 4.2), Rust (>= 1.80), Cargo
+* **Key R Dependencies**: `terra` (>= 1.7.0), `rextendr` (>= 0.5.0), `tinytest`, `roxygen2`
+* **Key Rust Dependencies**: `extendr-api` (0.9.0), `rayon` (1.7), `geo` (0.28)
+* **Configuration Files**:
+  * `DESCRIPTION` -- Package metadata, dependencies, minimum versions
+  * `NAMESPACE` -- Exported symbols and C entrypoints
+  * `.Rbuildignore` -- Files excluded from R package tarballs
+
+### System Boundaries & Operational Rules
+
+#### Always
+* Run `make test` and `make clippy` before committing changes.
+* Run `make docs` whenever modifying roxygen docstrings.
+* Validate that input coordinates and templates are strictly in geographic CRS (longitude/latitude).
+* Run `make vendor` if updating dependencies in `src/rust/Cargo.toml`.
+
+#### Ask First
+* Adding new external R package dependencies to `DESCRIPTION`.
+* Adding new Rust crates to `src/rust/Cargo.toml`.
+* Changing public function names or signatures in `R/geodensity.R`.
+
+#### Never
+* Never manually edit `R/extendr-wrappers.R` or files in `man/` (use `rextendr::document()` or `make docs`).
+* Never commit the uncompressed `src/rust/vendor/` directory (only `vendor.tar.xz` is checked in).
+* Never bypass CRS validation checks for non-geographic coordinate systems.
+
+## References
+
+* `planning/GOALS.md` -- Project goals and dependency graph
+* `planning/EXECUTION_PLAN_2.md` -- Architecture and refinement plan
+* `TODO.md` -- Current task status and notes
