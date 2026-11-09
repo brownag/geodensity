@@ -387,6 +387,12 @@ expect_error(
 )
 
 expect_error(
+  kde_geodesic(pts_epsg4269, template_crs84, bandwidth = 50),
+  pattern = "same CRS",
+  info = "kde_geodesic should reject points and template using different geographic CRSs"
+)
+
+expect_error(
   kde_adaptive(pts_vec, template, pilot_bandwidth = 50, min_bandwidth = -5),
   info = "Should reject negative min_bandwidth"
 )
@@ -412,14 +418,21 @@ expect_true(
 
 
 # =============================================================================
-# Test 30: Adaptive KDE works with default min_bandwidth
+# Test 30: Adaptive KDE works with default min_bandwidth (matches explicit 10%)
 # =============================================================================
-# Compute with implicit default
+# Compute with implicit default and explicit 10%
 result_default_min <- kde_adaptive(pts_clustered, template_clustered, pilot_bandwidth = 50)
+result_explicit_min <- kde_adaptive(pts_clustered, template_clustered, pilot_bandwidth = 50, min_bandwidth = 5)
 
 expect_true(
   inherits(result_default_min, "SpatRaster"),
   info = "Adaptive with default min_bandwidth should work"
+)
+
+expect_identical(
+  terra::values(result_default_min),
+  terra::values(result_explicit_min),
+  info = "Default min_bandwidth (NULL) should exactly match explicit 10% pilot"
 )
 
 
@@ -759,7 +772,8 @@ expect_equal(b34_res$log_likelihood[1], b34_brute, tolerance = 1e-10,
              info = "LOOCV score scale matches brute force (intensity normalization)")
 
 # Test 34c: S7 print header and optimal line.
-b34_out <- capture.output(print(b34_res))
+b34_out <- capture.output(b34_ret <- print(b34_res))
+expect_identical(b34_ret, b34_res, info = "print.bandwidth_cv returns input invisibly")
 expect_true(any(grepl("Bandwidth Cross-Validation Results", b34_out)),
             info = "print.bandwidth_cv: header")
 expect_true(any(grepl("Optimal bandwidth", b34_out)),
