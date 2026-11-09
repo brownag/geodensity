@@ -234,7 +234,7 @@ The bandwidth maximizing average log-likelihood across held-out points is select
 
 The Rust computation engine uses a spatial cell hash index with latitude-dependent search bounds:
 
-* **Memory Efficient**: Memory consumption scales with the grid cell count of the output raster, not the number of input points.
+* **Memory**: Memory grows with both the number of input points (spatial index and per-point normalization) and the number of output grid cells. `bandwidth_optimize()` also allocates a density array proportional to the number of points multiplied by the number of candidate bandwidths.
 * **Parallel Execution**: Grid cells are evaluated in parallel across CPU threads using Rayon.
 * **Sublinear Scaling**: Points outside the kernel cutoff (3 * bandwidth) are pruned early using spatial indexing.
 
