@@ -1,8 +1,10 @@
 # Title: Urban incident-density workflow
 # Description: Selects a bandwidth by cross-validation and compares fixed and adaptive KDE.
 #
-# Run from an installed geodensity package:
-#   Rscript inst/examples/urban_incidents.R
+# Run directly from a source checkout:
+#   Rscript demo/urban_incidents.R
+# Or run the installed demo with:
+#   demo("urban_incidents", package = "geodensity")
 #
 # This reproducible example simulates incidents around a dense city center and
 # sparse satellite communities, selects a fixed bandwidth by LOOCV, and compares
